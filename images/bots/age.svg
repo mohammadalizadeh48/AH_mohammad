@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" role="img" aria-label="تصویر ربات تخمین سن با هوش مصنوعی">
+<defs>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#061c43"/><stop offset="1" stop-color="#07102b"/></linearGradient>
+ <radialGradient id="glow"><stop stop-color="#15dfff" stop-opacity=".42"/><stop offset="1" stop-color="#15dfff" stop-opacity="0"/></radialGradient>
+ <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff"/><stop offset=".35" stop-color="#15dfff"/><stop offset="1" stop-color="#123c79"/></linearGradient>
+ <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#15dfff" stroke-opacity=".17" stroke-width="2"/></pattern>
+ <filter id="shadow"><feGaussianBlur stdDeviation="18"/></filter>
+</defs>
+<rect width="1200" height="600" fill="url(#bg)"/><rect width="1200" height="600" fill="url(#grid)"/>
+<ellipse cx="610" cy="300" rx="490" ry="270" fill="url(#glow)"/>
+
+<rect x="170" y="100" width="860" height="400" rx="28" fill="#061d40" stroke="#14caff" stroke-width="5" opacity=".85"/>
+<g stroke="#19d9ff" stroke-width="5" fill="none" opacity=".8"><path d="M230 170h120v80H230zM850 165h120v80H850zM230 355h120v80H230zM850 355h120v80H850z"/><path d="M350 210h100M750 205h100M350 395h100M750 395h100"/></g>
+<ellipse cx="600" cy="245" rx="108" ry="125" fill="#d99a78"/><path d="M492 230q-5-150 110-145q110 0 112 140l-30-48-30-25-45 28-78-15Z" fill="#182c4a"/><path d="M535 245h40M625 245h40" stroke="#192b42" stroke-width="9" stroke-linecap="round"/><path d="M570 310q30 24 60 0" stroke="#7b3540" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M470 485q15-155 130-155t130 155" fill="#116aab" stroke="#37dfff" stroke-width="8"/>
+<path d="M600 120v360M485 245h230" stroke="#00ffe0" stroke-width="3" stroke-dasharray="10 12" opacity=".75"/>
+<rect x="880" y="265" width="105" height="70" rx="12" fill="#062b55" stroke="#16e5ff" stroke-width="5"/><text x="932" y="314" fill="#5cf4ff" font-size="40" font-family="Arial" text-anchor="middle" font-weight="bold">AI</text>
+<text x="270" y="310" fill="#3fe8ff" font-size="54" font-family="Arial" font-weight="bold">25+</text>
+<path d="M0 500 Q300 430 600 520 T1200 490V600H0Z" fill="#020817" opacity=".35"/>
+<path d="M0 560H1200" stroke="#15dfff" stroke-opacity=".45" stroke-width="2"/>
+</svg>
