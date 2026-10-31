@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
       cover.className = "project-cover";
       cover.src = "/images/bots/" + botType + ".svg";
       cover.alt = "تصویر اختصاصی " + (p.title || "ربات تلگرام");
-      cover.loading = "lazy";
+      cover.loading = "eager";
       cover.decoding = "async";
       cover.onerror = () => { cover.remove(); };
       const label = document.createElement("span");
