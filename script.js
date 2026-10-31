@@ -44,7 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
       art.className = "project-art art-" + botType;
       const cover = document.createElement("img");
       cover.className = "project-cover";
-      cover.src = "/images/bots/" + botType + ".jpg?v=20261031";
+      cover.src = "/images/bots/" + botType + ".svg?v=20261031";
       cover.alt = "تصویر اختصاصی " + (p.title || "ربات تلگرام");
       cover.loading = "eager";
       cover.decoding = "async";
