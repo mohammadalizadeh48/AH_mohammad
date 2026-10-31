@@ -32,14 +32,27 @@ document.addEventListener("DOMContentLoaded", () => {
       card.target = "_blank";
       card.rel = "noopener";
       const art = document.createElement("div");
-      art.className = "project-art " + (i % 3 === 0 ? "art-dooz" : i % 3 === 1 ? "art-market" : "art-market");
-      const symbol = document.createElement("span");
-      symbol.className = "market-symbol";
-      symbol.textContent = p.title.includes("حافظ") ? "📜" : p.title.includes("هوش") || p.title.includes("سن") ? "AI" : p.title.includes("ساعت") || p.title.includes("زمان") ? "◷" : "✦";
+      const botType = p.url && p.url.includes("mohammad123alizadeh_bot") ? "war"
+        : p.url && p.url.includes("mohammad12543778alizadeh_bot") ? "dollar"
+        : p.url && p.url.includes("mohammad125437178alizadeh_bot") ? "time"
+        : p.url && p.url.includes("mohammad127437178alizadeh_bot") ? "hafez"
+        : p.url && p.url.includes("mohammad12543alizadeh_bot") ? "age"
+        : p.title.includes("حافظ") ? "hafez"
+        : p.title.includes("هوش") || p.title.includes("سن") ? "age"
+        : p.title.includes("ساعت") || p.title.includes("زمان") ? "time"
+        : p.title.includes("دلار") ? "dollar" : "war";
+      art.className = "project-art art-" + botType;
+      const cover = document.createElement("img");
+      cover.className = "project-cover";
+      cover.src = "/images/bots/" + botType + ".svg";
+      cover.alt = "تصویر اختصاصی " + (p.title || "ربات تلگرام");
+      cover.loading = "lazy";
+      cover.decoding = "async";
+      cover.onerror = () => { cover.remove(); };
       const label = document.createElement("span");
       label.className = "art-label";
       label.textContent = "ربات تلگرام";
-      art.append(symbol, label);
+      art.append(cover, label);
       const info = document.createElement("div");
       info.className = "project-info";
       const details = document.createElement("div");
