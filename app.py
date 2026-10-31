@@ -15,7 +15,7 @@ def load_data():
     return DEFAULT_DATA
 def save_data(data): DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 LOGIN = '''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ورود مدیر</title><style>body{margin:0;background:#071225;color:#eef6ff;font-family:Tahoma;display:grid;place-items:center;min-height:100vh}.box{width:min(410px,88vw);padding:28px;border:1px solid #164a79;border-radius:18px;background:#0a1b33;box-sizing:border-box}p{color:#aac4e2}input,button{width:100%;box-sizing:border-box;padding:13px;border-radius:9px;margin-top:12px;font:inherit}input{background:#061020;color:white;border:1px solid #24527c}button{border:0;background:#00d8ef;color:#031225;font-weight:bold}.error{color:#ff9ba9}</style><div class="box"><h1>ورود به پنل مدیریت</h1><p>رمز مدیر را وارد کن.</p>{% if error %}<p class="error">{{ error }}</p>{% endif %}<form method="post"><input name="password" type="password" placeholder="رمز عبور مدیر" required autofocus><button>ورود</button></form></div></html>'''
-PANEL = '''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>پنل مدیریت</title><style>body{margin:0;background:#061020;color:#eff7ff;font-family:Tahoma;line-height:1.8}.wrap{max-width:900px;margin:30px auto;padding:18px}.top,.card{background:#0a1b33;border:1px solid #17436c;border-radius:15px;padding:20px;margin-bottom:18px}label{display:block;margin:12px 0 5px}input,textarea{width:100%;box-sizing:border-box;background:#061020;color:white;border:1px solid #25547c;border-radius:8px;padding:11px;font:inherit}textarea{min-height:65px}button,.link{display:inline-block;border:0;border-radius:8px;background:#00d8ef;color:#031225;padding:10px 18px;font:inherit;font-weight:bold;text-decoration:none;margin-top:14px}.muted{color:#a9c3e0;font-size:13px}.success{color:#7fffc4}.grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}@media(max-width:650px){.grid{grid-template-columns:1fr}.wrap{padding:12px}}</style><div class="wrap"><div class="top"><h1>پنل مدیریت سایت</h1><p class="muted">نام، توضیحات و لینک ربات‌ها را ویرایش کن.</p>{% if saved %}<p class="success">تغییرات ذخیره شد.</p>{% endif %}<a class="link" href="/">مشاهده سایت</a> <a class="link" href="/admin/logout">خروج</a></div><form method="post"><div class="card"><h2>راه ارتباطی</h2><label>لینک تلگرام مدیر</label><input name="contact" value="{{ data.contact }}" required></div><div class="grid">{% for p in data.projects %}<div class="card"><h2>ربات {{ loop.index }}</h2><label>نام</label><input name="title_{{ loop.index0 }}" value="{{ p.title }}" required><label>توضیحات</label><textarea name="description_{{ loop.index0 }}">{{ p.description }}</textarea><label>لینک ربات</label><input name="url_{{ loop.index0 }}" value="{{ p.url }}" required></div>{% endfor %}</div><button type="submit">ذخیره تغییرات</button></form></div></html>'''
+PANEL = '''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>پنل مدیریت</title><style>body{margin:0;background:#061020;color:#eff7ff;font-family:Tahoma;line-height:1.8}.wrap{max-width:900px;margin:30px auto;padding:18px}.top,.card{background:#0a1b33;border:1px solid #17436c;border-radius:15px;padding:20px;margin-bottom:18px}label{display:block;margin:12px 0 5px}input,textarea{width:100%;box-sizing:border-box;background:#061020;color:white;border:1px solid #25547c;border-radius:8px;padding:11px;font:inherit}textarea{min-height:65px}button,.link{display:inline-block;border:0;border-radius:8px;background:#00d8ef;color:#031225;padding:10px 18px;font:inherit;font-weight:bold;text-decoration:none;margin-top:14px}.muted{color:#a9c3e0;font-size:13px}.success{color:#7fffc4}.grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}@media(max-width:650px){.grid{grid-template-columns:1fr}.wrap{padding:12px}}</style><div class="wrap"><div class="top"><h1>پنل مدیریت سایت</h1><p class="muted">نام، توضیحات و لینک ربات‌ها را ویرایش کن.</p>{% if saved %}<p class="success">تغییرات ذخیره شد.</p>{% endif %}<a class="link" href="/">مشاهده سایت</a> <a class="link" href="/admin/logout">خروج</a></div><form method="post"><div class="card"><h2>راه ارتباطی</h2><label>لینک تلگرام مدیر</label><input name="contact" value="{{ data.contact }}" required></div><div class="grid">{% for p in data.projects %}<div class="card"><h2>ربات {{ loop.index }}</h2><label>نام</label><input name="title_{{ loop.index0 }}" value="{{ p.title }}" required><label>توضیحات</label><textarea name="description_{{ loop.index0 }}">{{ p.description }}</textarea><label>لینک ربات</label><input name="url_{{ loop.index0 }}" value="{{ p.url }}" required><label><input type="checkbox" name="delete_{{ loop.index0 }}" value="1" style="width:auto"> حذف این ربات</label></div>{% endfor %}</div><div class="card"><h2>افزودن ربات جدید</h2><label>نام ربات</label><input name="new_title" placeholder="مثلاً ربات ساعت"><label>توضیحات</label><textarea name="new_description" placeholder="توضیح کوتاه درباره ربات"></textarea><label>لینک تلگرام</label><input name="new_url" placeholder="https://t.me/username"></div><button type="submit">ذخیره تغییرات</button></form></div></html>'''
 @app.get("/")
 def home(): return app.send_static_file("index.html")
 @app.get("/api/site")
@@ -35,12 +35,24 @@ def admin():
         contact = request.form.get("contact", "").strip()
         if not contact.startswith("https://t.me/"): abort(400, "لینک تماس باید https://t.me/ باشد")
         data["contact"] = contact
+        updated_projects = []
         for i, p in enumerate(data["projects"]):
-            p["title"] = request.form.get(f"title_{i}", p["title"]).strip()[:100]
-            p["description"] = request.form.get(f"description_{i}", p["description"]).strip()[:500]
+            if request.form.get(f"delete_{i}") == "1":
+                continue
+            title = request.form.get(f"title_{i}", p["title"]).strip()[:100]
+            description = request.form.get(f"description_{i}", p["description"]).strip()[:500]
             url = request.form.get(f"url_{i}", p["url"]).strip()
             if not url.startswith("https://t.me/"): abort(400, "لینک ربات باید https://t.me/ باشد")
-            p["url"] = url
+            if not title: abort(400, "نام ربات نمی‌تواند خالی باشد")
+            updated_projects.append({"title": title, "description": description, "url": url})
+        new_title = request.form.get("new_title", "").strip()[:100]
+        new_description = request.form.get("new_description", "").strip()[:500]
+        new_url = request.form.get("new_url", "").strip()
+        if new_title or new_url:
+            if not new_title or not new_url.startswith("https://t.me/"):
+                abort(400, "برای افزودن ربات، نام و لینک معتبر https://t.me/ لازم است")
+            updated_projects.append({"title": new_title, "description": new_description, "url": new_url})
+        data["projects"] = updated_projects
         save_data(data); saved = True
     return render_template_string(PANEL, data=data, saved=saved)
 @app.get("/admin/logout")
