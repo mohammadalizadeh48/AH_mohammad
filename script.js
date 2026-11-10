@@ -1,77 +1,34 @@
-document.addEventListener("DOMContentLoaded", () => {
-  "use strict";
-  const menuToggle = document.querySelector("#menuToggle");
-  const nav = document.querySelector("#nav");
-  const navLinks = document.querySelectorAll(".nav a");
-  const closeMenu = () => { if (!nav || !menuToggle) return; nav.classList.remove("open"); menuToggle.classList.remove("active"); menuToggle.setAttribute("aria-expanded", "false"); };
-  if (menuToggle && nav) {
-    menuToggle.addEventListener("click", () => { const open = nav.classList.toggle("open"); menuToggle.classList.toggle("active", open); menuToggle.setAttribute("aria-expanded", String(open)); });
-    navLinks.forEach(link => link.addEventListener("click", closeMenu));
-    document.addEventListener("click", event => { if (nav.classList.contains("open") && !nav.contains(event.target) && !menuToggle.contains(event.target)) closeMenu(); });
-  }
-  const reveals = document.querySelectorAll(".reveal");
-  if ("IntersectionObserver" in window) { const observer = new IntersectionObserver((entries, obs) => entries.forEach(entry => { if (entry.isIntersecting) { entry.target.classList.add("visible"); obs.unobserve(entry.target); } }), { threshold: 0.12, rootMargin: "0px 0px -35px 0px" }); reveals.forEach(el => observer.observe(el)); } else reveals.forEach(el => el.classList.add("visible"));
-  document.querySelectorAll(".project-card").forEach(card => { card.addEventListener("pointermove", event => { const r = card.getBoundingClientRect(); card.style.setProperty("--mouse-x", `${event.clientX-r.left}px`); card.style.setProperty("--mouse-y", `${event.clientY-r.top}px`); }); });
-  const sections = document.querySelectorAll("section[id]");
-  if ("IntersectionObserver" in window) { const sectionObserver = new IntersectionObserver(entries => entries.forEach(entry => { if (!entry.isIntersecting) return; navLinks.forEach(link => { const active = link.getAttribute("href") === `#${entry.target.id}`; link.classList.toggle("active", active); if (active) link.setAttribute("aria-current", "location"); else link.removeAttribute("aria-current"); }); }), { threshold: 0.25, rootMargin: "-15% 0px -55% 0px" }); sections.forEach(section => sectionObserver.observe(section)); }
-  document.querySelectorAll('a[href^="#"]').forEach(link => link.addEventListener("click", event => { const href = link.getAttribute("href"); const target = href && href !== "#" ? document.querySelector(href) : null; if (!target) return; event.preventDefault(); target.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); if (location.hash !== href) history.replaceState(null, "", href); }));
-  const year = document.querySelector("#year"); if (year) year.textContent = new Date().getFullYear();
-  fetch("/api/site").then(r => r.ok ? r.json() : null).then(data => {
-    if (!data) return;
-    if (data.contact) document.querySelectorAll('a[href="https://t.me/mohammad52766"]').forEach(a => a.href = data.contact);
-    const grid = document.querySelector("#projectGrid");
-    if (!grid) return;
-    grid.replaceChildren();
-    const count = document.querySelector("#projectCount");
-    const projects = Array.isArray(data.projects) ? data.projects : [];
-    if (count) count.firstChild.textContent = new Intl.NumberFormat("fa-IR").format(projects.length) + " ربات فعال ";
-    projects.forEach((p, i) => {
-      const card = document.createElement("a");
-      card.className = "project-card reveal visible";
-      card.href = p.url;
-      card.target = "_blank";
-      card.rel = "noopener";
-      const art = document.createElement("div");
-      const botType = p.url && p.url.includes("mohammad123alizadeh_bot") ? "war"
-        : p.url && p.url.includes("mohammad12543778alizadeh_bot") ? "dollar"
-        : p.url && p.url.includes("mohammad125437178alizadeh_bot") ? "time"
-        : p.url && p.url.includes("mohammad127437178alizadeh_bot") ? "hafez"
-        : p.url && p.url.includes("mohammad12543alizadeh_bot") ? "age"
-        : p.title.includes("حافظ") ? "hafez"
-        : p.title.includes("هوش") || p.title.includes("سن") ? "age"
-        : p.title.includes("ساعت") || p.title.includes("زمان") ? "time"
-        : p.title.includes("دلار") ? "dollar" : "war";
-      art.className = "project-art art-" + botType;
-      const cover = document.createElement("img");
-      cover.className = "project-cover";
-      cover.src = "/images/bots/" + botType + ".svg?v=20261031";
-      cover.alt = "تصویر اختصاصی " + (p.title || "ربات تلگرام");
-      cover.loading = "eager";
-      cover.decoding = "async";
-      cover.onerror = () => { cover.remove(); };
-      const label = document.createElement("span");
-      label.className = "art-label";
-      label.textContent = "ربات تلگرام";
-      art.append(cover, label);
-      const info = document.createElement("div");
-      info.className = "project-info";
-      const details = document.createElement("div");
-      const heading = document.createElement("h3");
-      heading.textContent = p.title || "ربات تلگرام";
-      const description = document.createElement("p");
-      description.textContent = p.description || "";
-      details.append(heading, description);
-      const arrow = document.createElement("span");
-      arrow.className = "project-arrow";
-      arrow.textContent = "↗";
-      info.append(details, arrow);
-      const tags = document.createElement("div");
-      tags.className = "project-tags";
-      const tag = document.createElement("span");
-      tag.textContent = "ربات تلگرام";
-      tags.append(tag);
-      card.append(art, info, tags);
-      grid.append(card);
-    });
-  }).catch(() => {});
+document.addEventListener("DOMContentLoaded",()=>{
+"use strict";
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const sidebar=$("#sidebar"),scrim=$("#sidebarScrim");
+function closeNav(){sidebar?.classList.remove("open");scrim?.classList.remove("show")}
+$("#sidebarToggle")?.addEventListener("click",()=>{sidebar.classList.toggle("open");scrim.classList.toggle("show")});
+scrim?.addEventListener("click",closeNav);
+$$(".side-link").forEach(a=>a.addEventListener("click",closeNav));
+$("#year").textContent=new Date().getFullYear();
+const sections=$$(".studio-section[id]"),links=$$(".side-link");
+if("IntersectionObserver"in window){const io=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting)links.forEach(a=>a.classList.toggle("active",a.hash==="#"+e.target.id))}),{rootMargin:"-25% 0px -65% 0px"});sections.forEach(s=>io.observe(s))}
+function message(out,text,ok=true){if(out){out.textContent=text;out.style.color=ok?"#7fffc4":"#ff9cae"}}
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"در ارتباط با سرور مشکلی پیش آمد.");return data}
+async function loadSite(){try{const d=await api("/api/site");const grid=$("#projectGrid");grid.replaceChildren();(d.projects||[]).forEach(p=>{const u=p.url||"",title=p.title||"ربات تلگرام";const type=u.includes("mohammad123alizadeh_bot")?"war":u.includes("mohammad12543778alizadeh_bot")?"dollar":u.includes("mohammad125437178alizadeh_bot")?"time":u.includes("mohammad127437178alizadeh_bot")?"hafez":u.includes("mohammad12543alizadeh_bot")?"age":title.includes("حافظ")?"hafez":title.includes("سن")?"age":title.includes("ساعت")?"time":title.includes("دلار")?"dollar":"war";const a=document.createElement("a");a.className="studio-card project-card";a.href=u;a.target="_blank";a.rel="noopener";const art=document.createElement("div");art.className="project-art";const img=document.createElement("img");img.className="project-cover";img.src="/images/bots/"+type+".svg?v=studio20261110";img.alt="تصویر "+title;img.onerror=()=>img.remove();art.append(img);const info=document.createElement("div");info.className="project-info";const desc=document.createElement("div");const h=document.createElement("h3");h.textContent=title;const pdesc=document.createElement("p");pdesc.textContent=p.description||"";desc.append(h,pdesc);const arrow=document.createElement("span");arrow.className="project-arrow";arrow.textContent="↗";info.append(desc,arrow);const tags=document.createElement("div");tags.className="project-tags";tags.innerHTML="<span>ربات تلگرام</span>";a.append(art,info,tags);grid.append(a)});$("#projectCount").textContent=(d.projects||[]).length+" ربات ثبت‌شده";}catch(e){$("#projectCount").textContent="دریافت اطلاعات ناموفق"}}
+async function loadStats(){try{const d=await api("/api/stats");$("#statBots").textContent=d.bots??"—";$("#statVisits").textContent=Number(d.visits||0).toLocaleString("fa-IR");$("#statProjects").textContent=d.projects??"نامشخص";$("#statUsers").textContent=d.users??"نامشخص";$("#statServices").textContent=d.services??"نامشخص"}catch{}}
+async function loadStatus(){const box=$("#statusList");try{const rows=await api("/api/status");box.replaceChildren();rows.forEach(x=>{const card=document.createElement("article");card.className="studio-card status-unknown";const h=document.createElement("h3");h.textContent=x.name;const p=document.createElement("p");p.textContent=x.label;card.append(h,p);box.append(card)});if(!rows.length)box.textContent="سرویسی ثبت نشده است."}catch{box.textContent="دریافت وضعیت ممکن نشد."}}
+$("#refreshStatus")?.addEventListener("click",loadStatus);
+$("#makePassword")?.addEventListener("click",()=>{const n=Math.max(8,Math.min(64,Number($("#passwordLength").value)||16));const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*_-";const bytes=new Uint32Array(n);crypto.getRandomValues(bytes);let s="";for(let i=0;i<n;i++)s+=chars[bytes[i]%chars.length];$("#passwordOutput").textContent=s});
+$$("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{const t=$("#"+b.dataset.copy).textContent;if(!t)return;try{await navigator.clipboard.writeText(t);b.textContent="کپی شد";setTimeout(()=>b.textContent="کپی رمز",1200)}catch{message($("#passwordOutput"),"امکان کپی خودکار نیست؛ متن را دستی انتخاب کن.",false)}}));
+$("#makeQr")?.addEventListener("click",()=>{const value=$("#qrText").value.trim(),out=$("#qrOutput");out.replaceChildren();if(!value){out.textContent="ابتدا متن یا لینک را وارد کن.";return}const img=document.createElement("img");img.alt="QR Code";img.src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data="+encodeURIComponent(value);out.append(img)});
+$("#shortenUrl")?.addEventListener("click",async()=>{const out=$("#shortUrlOutput");try{const d=await api("/api/shorten",{method:"POST",body:JSON.stringify({url:$("#longUrl").value.trim()})});out.textContent=d.url}catch(e){message(out,e.message,false)}});
+$("#toUpper")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toUpperCase());
+$("#toLower")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toLowerCase());
+$("#contactForm")?.addEventListener("submit",async e=>{e.preventDefault();const form=new FormData(e.currentTarget);try{const d=await api("/api/contact",{method:"POST",body:JSON.stringify(Object.fromEntries(form))});message($("#contactResult"),d.message);e.currentTarget.reset()}catch(err){message($("#contactResult"),err.message,false)}});
+async function loadIdeas(){const box=$("#ideasList");try{const rows=await api("/api/suggestions");box.replaceChildren();rows.forEach(x=>{const item=document.createElement("div");item.className="glass-panel idea-item";const content=document.createElement("div");const h=document.createElement("h4");h.textContent=x.title;const p=document.createElement("p");p.textContent=x.description||"";content.append(h,p);const b=document.createElement("button");b.className="vote-btn";b.textContent="♡ "+Number(x.votes).toLocaleString("fa-IR");b.addEventListener("click",async()=>{try{await api("/api/suggestions/"+x.id+"/vote",{method:"POST",body:"{}"});loadIdeas()}catch(e){b.textContent=e.message}});item.append(content,b);box.append(item)});if(!rows.length)box.textContent="هنوز پیشنهادی ثبت نشده است."}catch{box.textContent="دریافت پیشنهادها ممکن نشد."}}
+$("#ideaForm")?.addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{const d=await api("/api/suggestions",{method:"POST",body:JSON.stringify(Object.fromEntries(f))});message($("#ideaResult"),d.message);e.currentTarget.reset();loadIdeas()}catch(err){message($("#ideaResult"),err.message,false)}});
+let target=Math.floor(Math.random()*20)+1,attempts=0;
+$("#guessButton")?.addEventListener("click",()=>{const n=Number($("#guessInput").value),out=$("#guessResult");if(n<1||n>20||!Number.isInteger(n)){message(out,"عدد بین ۱ تا ۲۰ وارد کن.",false);return}attempts++;message(out,n===target?"آفرین! درست حدس زدی؛ تعداد تلاش: "+attempts:n<target?"عدد بزرگ‌تری انتخاب کن.":"عدد کوچک‌تری انتخاب کن.");if(n===target)$("#guessButton").disabled=true});
+$("#resetGuess")?.addEventListener("click",()=>{target=Math.floor(Math.random()*20)+1;attempts=0;$("#guessInput").value="";$("#guessButton").disabled=false;$("#guessResult").textContent="بازی جدید شروع شد."});
+$$("[data-rps]").forEach(b=>b.addEventListener("click",()=>{const opts=["سنگ","کاغذ","قیچی"],computer=opts[Math.floor(Math.random()*3)],you=b.dataset.rps;const result=you===computer?"مساوی شد!":(you==="سنگ"&&computer==="قیچی")||(you==="کاغذ"&&computer==="سنگ")||(you==="قیچی"&&computer==="کاغذ")?"تو بردی!":"این بار کامپیوتر برد.";$("#rpsResult").textContent="تو: "+you+" | کامپیوتر: "+computer+" — "+result}));
+const saved=JSON.parse(localStorage.getItem("studioPrefs")||"{}");function applyPrefs(p){document.body.classList.toggle("theme-light",p.theme==="light");document.body.classList.toggle("accent-purple",p.accent==="purple");document.body.classList.toggle("accent-cyan",p.accent==="cyan");$("#themeSelect").value=p.theme||"dark";$("#accentSelect").value=p.accent||"blue"}applyPrefs(saved);
+$("#saveSettings")?.addEventListener("click",()=>{const p={theme:$("#themeSelect").value,accent:$("#accentSelect").value};localStorage.setItem("studioPrefs",JSON.stringify(p));applyPrefs(p);message($("#settingsResult"),"تنظیمات در همین مرورگر ذخیره شد.")});
+loadSite();loadStats();loadStatus();loadIdeas();
 });
