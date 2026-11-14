@@ -9,7 +9,7 @@ DB_FILE = Path(os.environ.get("DATA_DB_PATH", str(BASE_DIR / "mohammad_studio.sq
 app = Flask(__name__, static_folder=str(BASE_DIR), static_url_path="")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=1024*1024)
-DEFAULT_DATA = {"contact":"https://t.me/mohammad52766","projects":[]}
+DEFAULT_DATA = {"contact":"https://t.me/mohammad52766","projects":[],"portfolio":[]}
 
 def load_data():
     try:
@@ -54,7 +54,7 @@ def stats():
         visits=c.execute("SELECT COALESCE(SUM(count),0) n FROM visits").fetchone()["n"]
         suggestions=c.execute("SELECT COUNT(*) n FROM suggestions").fetchone()["n"]
         messages=c.execute("SELECT COUNT(*) n FROM messages").fetchone()["n"]
-    return jsonify(bots=len(d.get("projects",[])),projects=None,users=None,visits=visits,services=None,suggestions=suggestions,messages=messages)
+    return jsonify(bots=len(d.get("projects",[])),projects=len(d.get("portfolio",[])),users=None,visits=visits,services=None,suggestions=suggestions,messages=messages)
 
 @app.get("/api/status")
 def status():
@@ -103,7 +103,7 @@ def shortlink(code):
     return redirect(row["target"],code=302)
 
 LOGIN='''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ورود مدیر</title><style>body{background:#071225;color:white;font-family:Tahoma;display:grid;place-items:center;min-height:100vh}.box{padding:28px;background:#0a1b33;border:1px solid #164a79;border-radius:18px;width:min(400px,85vw)}input,button{box-sizing:border-box;width:100%;padding:13px;margin-top:12px;border-radius:9px}input{background:#061020;color:white;border:1px solid #24527c}button{background:#00d8ef;font-weight:bold}</style><div class="box"><h1>ورود مدیر</h1>{% if error %}<p>{{error}}</p>{% endif %}<form method="post"><input name="password" type="password" placeholder="رمز مدیر" required><button>ورود</button></form></div></html>'''
-PANEL='''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>مدیریت محمد استودیو</title><style>body{background:#061020;color:white;font-family:Tahoma}.wrap{max-width:900px;margin:30px auto;padding:18px}.card{background:#0a1b33;border:1px solid #17436c;border-radius:15px;padding:20px;margin:15px 0}input,textarea{width:100%;box-sizing:border-box;background:#061020;color:white;border:1px solid #25547c;border-radius:8px;padding:11px;margin:8px 0}button,a{display:inline-block;background:#00d8ef;color:#031225;padding:10px 18px;border-radius:8px;text-decoration:none;border:0;margin:8px 0}</style><div class="wrap"><h1>پنل مدیریت محمد استودیو</h1><a href="/">مشاهده سایت</a><a href="/admin/logout">خروج</a>{% if saved %}<p>ذخیره شد.</p>{% endif %}<form method="post"><div class="card"><h2>ارتباط</h2><input name="contact" value="{{data.contact}}"></div>{% for p in data.projects %}<div class="card"><h2>ربات {{loop.index}}</h2><input name="title_{{loop.index0}}" value="{{p.title}}"><textarea name="description_{{loop.index0}}">{{p.description}}</textarea><input name="url_{{loop.index0}}" value="{{p.url}}"><label><input type="checkbox" name="delete_{{loop.index0}}" value="1" style="width:auto"> حذف</label></div>{% endfor %}<div class="card"><h2>ربات جدید</h2><input name="new_title" placeholder="نام"><textarea name="new_description" placeholder="توضیحات"></textarea><input name="new_url" placeholder="https://t.me/..."></div><button>ذخیره تغییرات</button></form></div>'''
+PANEL='''<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>مدیریت محمد استودیو</title><style>body{background:#061020;color:white;font-family:Tahoma}.wrap{max-width:900px;margin:30px auto;padding:18px}.card{background:#0a1b33;border:1px solid #17436c;border-radius:15px;padding:20px;margin:15px 0}input,textarea{width:100%;box-sizing:border-box;background:#061020;color:white;border:1px solid #25547c;border-radius:8px;padding:11px;margin:8px 0}button,a{display:inline-block;background:#00d8ef;color:#031225;padding:10px 18px;border-radius:8px;text-decoration:none;border:0;margin:8px 0}</style><div class="wrap"><h1>پنل مدیریت محمد استودیو</h1><a href="/">مشاهده سایت</a><a href="/admin/logout">خروج</a>{% if saved %}<p>ذخیره شد.</p>{% endif %}<form method="post"><div class="card"><h2>ارتباط</h2><input name="contact" value="{{data.contact}}"></div>{% for p in data.projects %}<div class="card"><h2>ربات {{loop.index}}</h2><input name="title_{{loop.index0}}" value="{{p.title}}"><textarea name="description_{{loop.index0}}">{{p.description}}</textarea><input name="url_{{loop.index0}}" value="{{p.url}}"><label><input type="checkbox" name="delete_{{loop.index0}}" value="1" style="width:auto"> حذف</label></div>{% endfor %}<div class="card"><h2>ربات جدید</h2><input name="new_title" placeholder="نام"><textarea name="new_description" placeholder="توضیحات"></textarea><input name="new_url" placeholder="https://t.me/..."></div>{% for p in data.get("portfolio",[]) %}<div class="card"><h2>پروژه سایت {{loop.index}}</h2><input name="portfolio_title_{{loop.index0}}" value="{{p.title}}" placeholder="عنوان پروژه"><textarea name="portfolio_description_{{loop.index0}}" placeholder="توضیحات">{{p.description}}</textarea><input name="portfolio_category_{{loop.index0}}" value="{{p.category}}" placeholder="دسته‌بندی؛ مثلاً پروژه وب"><input name="portfolio_url_{{loop.index0}}" value="{{p.url}}" placeholder="لینک پروژه (اختیاری)"><input name="portfolio_image_{{loop.index0}}" value="{{p.image}}" placeholder="آدرس تصویر (اختیاری)"><label><input type="checkbox" name="portfolio_delete_{{loop.index0}}" value="1" style="width:auto"> حذف پروژه</label></div>{% endfor %}<div class="card"><h2>افزودن پروژه جدید</h2><input name="portfolio_new_title" placeholder="عنوان پروژه"><textarea name="portfolio_new_description" placeholder="توضیحات پروژه"></textarea><input name="portfolio_new_category" placeholder="دسته‌بندی"><input name="portfolio_new_url" placeholder="لینک پروژه (اختیاری)"><input name="portfolio_new_image" placeholder="آدرس تصویر (اختیاری)"></div><button>ذخیره تغییرات</button></form></div>'''
 
 @app.route("/admin",methods=["GET","POST"])
 def admin():
@@ -129,7 +129,31 @@ def admin():
         if nt or nu:
             if not nt or not nu.startswith("https://t.me/"): abort(400)
             updated.append({"title":nt,"description":nd,"url":nu})
-        data["projects"]=updated; DATA_FILE.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8"); saved=True
+        data["projects"]=updated
+        portfolio=[]
+        for i,p in enumerate(data.get("portfolio",[])):
+            if request.form.get(f"portfolio_delete_{i}")=="1": continue
+            title=request.form.get(f"portfolio_title_{i}","").strip()[:100]
+            desc=request.form.get(f"portfolio_description_{i}","").strip()[:1000]
+            category=request.form.get(f"portfolio_category_{i}","").strip()[:60] or "پروژه"
+            url=request.form.get(f"portfolio_url_{i}","").strip()[:500]
+            image=request.form.get(f"portfolio_image_{i}","").strip()[:500]
+            if not title: abort(400)
+            if url and not url.startswith(("https://","http://")): abort(400)
+            if image and not (image.startswith(("https://","http://","/"))): abort(400)
+            portfolio.append({"title":title,"description":desc,"category":category,"url":url,"image":image})
+        nt=request.form.get("portfolio_new_title","").strip()[:100]
+        nd=request.form.get("portfolio_new_description","").strip()[:1000]
+        nc=request.form.get("portfolio_new_category","").strip()[:60] or "پروژه"
+        nu=request.form.get("portfolio_new_url","").strip()[:500]
+        ni=request.form.get("portfolio_new_image","").strip()[:500]
+        if nt or nd or nu or ni:
+            if not nt: abort(400)
+            if nu and not nu.startswith(("https://","http://")): abort(400)
+            if ni and not (ni.startswith(("https://","http://","/"))): abort(400)
+            portfolio.append({"title":nt,"description":nd,"category":nc,"url":nu,"image":ni})
+        data["portfolio"]=portfolio
+        DATA_FILE.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding="utf-8"); saved=True
     return render_template_string(PANEL,data=data,saved=saved)
 @app.get("/admin/logout")
 def logout(): session.clear(); return redirect(url_for("admin"))
