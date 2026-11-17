@@ -22,6 +22,57 @@ function showQr(target,data,label){target.replaceChildren();if(label){const p=do
 $("#makeQr")?.addEventListener("click",async()=>{const value=$("#qrText").value.trim(),out=$("#qrOutput");if(!value){message(out,"ابتدا متن یا لینک را وارد کن.",false);return}out.textContent="در حال ساخت QR…";try{const d=await api("/api/qr/generate",{method:"POST",body:JSON.stringify({text:value})});showQr(out,d.qr,"QR با موفقیت ساخته شد.")}catch(e){message(out,e.message,false)}});
 $("#makeMediaQr")?.addEventListener("click",async()=>{const file=$("#qrMediaFile").files[0],out=$("#qrMediaOutput");if(!file){message(out,"ابتدا عکس یا ویدیو را انتخاب کن.",false);return}const form=new FormData();form.append("file",file);out.textContent="در حال بارگذاری فایل و ساخت QR…";try{const r=await fetch("/api/qr/upload",{method:"POST",body:form});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"بارگذاری فایل ناموفق بود.");showQr(out,d.qr,"QR فایل آماده شد. لینک مستقیم فایل:");const a=document.createElement("a");a.href=d.url;a.target="_blank";a.rel="noopener";a.textContent=d.url;a.className="text-action";out.append(a)}catch(e){message(out,e.message,false)}});
 $("#decodeQr")?.addEventListener("click",async()=>{const file=$("#qrDecodeFile").files[0],out=$("#qrDecodeOutput");if(!file){message(out,"ابتدا تصویر QR را انتخاب کن.",false);return}const form=new FormData();form.append("file",file);out.textContent="در حال خواندن QR…";try{const r=await fetch("/api/qr/decode",{method:"POST",body:form});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||"خواندن QR ناموفق بود.");out.replaceChildren();d.contents.forEach((value,index)=>{const p=document.createElement("p");p.textContent=(d.count>1?"کد "+(index+1)+": ":"محتوای QR: ")+value;out.append(p);if(value.startsWith("http://")||value.startsWith("https://")){const a=document.createElement("a");a.href=value;a.target="_blank";a.rel="noopener noreferrer";a.textContent="باز کردن لینک";a.className="text-action";out.append(a)}})}catch(e){message(out,e.message,false)}});
+
+const aiMessages = [];
+let aiBusy = false;
+const aiMessagesBox = $("#aiMessages"), aiWelcome = $("#aiWelcome"), aiInput = $("#aiInput"), aiSend = $("#aiSend"), aiNotice = $("#aiChatNotice");
+function addAiMessage(role, text) {
+  const item = document.createElement("article");
+  item.className = "ai-message " + (role === "user" ? "ai-user-message" : "ai-assistant-message");
+  const label = document.createElement("span");
+  label.className = "ai-message-label";
+  label.textContent = role === "user" ? "شما" : "دستیار هوشمند";
+  const body = document.createElement("p");
+  body.textContent = text;
+  item.append(label, body);
+  aiMessagesBox.append(item);
+  aiMessagesBox.scrollTop = aiMessagesBox.scrollHeight;
+  return item;
+}
+async function sendAiMessage(text) {
+  const prompt = String(text || "").trim();
+  if (!prompt || aiBusy) return;
+  if (prompt.length > 6000) { message(aiNotice, "پیام حداکثر می‌تواند ۶۰۰۰ نویسه باشد.", false); return; }
+  aiWelcome.hidden = true;
+  aiNotice.textContent = "";
+  aiMessages.push({role:"user",content:prompt});
+  addAiMessage("user",prompt);
+  aiInput.value = "";
+  aiBusy = true;
+  aiSend.disabled = true;
+  aiSend.textContent = "در حال پاسخ…";
+  const pending = addAiMessage("assistant","در حال فکر کردن…");
+  try {
+    const data = await api("/api/ai/chat",{method:"POST",body:JSON.stringify({messages:aiMessages})});
+    if (!data.reply) throw new Error("پاسخ خالی از سرور دریافت شد.");
+    aiMessages.push({role:"assistant",content:data.reply});
+    pending.querySelector("p").textContent = data.reply;
+  } catch (error) {
+    pending.remove();
+    aiMessages.pop();
+    message(aiNotice,error.message,false);
+  } finally {
+    aiBusy = false;
+    aiSend.disabled = false;
+    aiSend.textContent = "ارسال ↗";
+    aiInput.focus();
+    aiMessagesBox.scrollTop = aiMessagesBox.scrollHeight;
+  }
+}
+$("#aiChatForm")?.addEventListener("submit",event=>{event.preventDefault();sendAiMessage(aiInput.value);});
+$("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
+$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
+$("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
 $("#shortenUrl")?.addEventListener("click",async()=>{const out=$("#shortUrlOutput");try{const d=await api("/api/shorten",{method:"POST",body:JSON.stringify({url:$("#longUrl").value.trim()})});out.textContent=d.url}catch(e){message(out,e.message,false)}});
 $("#toUpper")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toUpperCase());
 $("#toLower")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toLowerCase());
