@@ -1,4 +1,4 @@
-import base64, io, json, os, secrets, sqlite3, uuid
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
@@ -58,6 +58,88 @@ def track():
 def home(): return app.send_static_file("index.html")
 @app.get("/api/site")
 def site(): return jsonify(load_data())
+
+@app.post("/api/ai/chat")
+def ai_chat():
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return jsonify(error="دستیار هوشمند هنوز به سرویس هوش مصنوعی متصل نشده است. مدیر سایت باید کلید API را در تنظیمات محیطی سرور ثبت کند."), 503
+
+    body = request.get_json(silent=True) or {}
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return jsonify(error="پیام خود را وارد کن."), 400
+    if len(messages) > 20:
+        messages = messages[-20:]
+
+    safe_messages = []
+    total_chars = 0
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        text = item.get("content")
+        if role not in ("user", "assistant") or not isinstance(text, str):
+            continue
+        text = text.strip()
+        if not text:
+            continue
+        if len(text) > 6000:
+            return jsonify(error="هر پیام حداکثر می‌تواند ۶۰۰۰ نویسه باشد."), 400
+        total_chars += len(text)
+        safe_messages.append({"role": role, "content": text})
+    if not safe_messages or safe_messages[-1]["role"] != "user":
+        return jsonify(error="آخرین پیام باید پیام شما باشد."), 400
+    if total_chars > 18000:
+        return jsonify(error="گفتگو بیش از حد طولانی است. یک گفتگوی جدید شروع کن."), 400
+
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", "gpt-5.5").strip() or "gpt-5.5",
+        "instructions": (
+            "تو دستیار هوش مصنوعی رسمی محمد استودیو هستی. به زبان فارسی روان، محترمانه، دقیق و کاربردی پاسخ بده؛ "
+            "اگر کاربر به زبان دیگری نوشت، به همان زبان پاسخ بده. اگر پاسخ را نمی‌دانی، صادقانه بگو. "
+            "برای موضوعات فنی مراحل را روشن و ایمن توضیح بده. اطلاعات یا دسترسی‌ای را که نداری ادعا نکن."
+        ),
+        "input": safe_messages,
+        "max_output_tokens": 1200
+    }
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=50) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        answer = result.get("output_text")
+        if not answer:
+            parts = []
+            for item in result.get("output", []):
+                if item.get("type") == "message":
+                    for block in item.get("content", []):
+                        if block.get("type") == "output_text" and block.get("text"):
+                            parts.append(block["text"])
+            answer = "\\n".join(parts).strip()
+        if not answer:
+            app.logger.error("AI API returned no text; response id=%s", result.get("id"))
+            return jsonify(error="پاسخ قابل‌نمایشی از سرویس هوش مصنوعی دریافت نشد. دوباره تلاش کن."), 502
+        return jsonify(reply=answer)
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", "replace")
+        app.logger.error("AI API HTTP error %s: %s", error.code, detail[:1200])
+        if error.code == 401:
+            return jsonify(error="کلید اتصال هوش مصنوعی معتبر نیست. مدیر سایت باید تنظیمات API را بررسی کند."), 502
+        if error.code == 429:
+            return jsonify(error="سهمیه یا محدودیت درخواست سرویس هوش مصنوعی فعال شده است. کمی بعد دوباره تلاش کن."), 429
+        return jsonify(error="ارتباط با سرویس هوش مصنوعی ناموفق بود. تنظیمات سرویس را بررسی کن."), 502
+    except (urllib.error.URLError, TimeoutError):
+        app.logger.exception("AI API connection failed")
+        return jsonify(error="اتصال به سرویس هوش مصنوعی برقرار نشد. کمی بعد دوباره تلاش کن."), 504
+    except (ValueError, KeyError, TypeError):
+        app.logger.exception("AI API response parsing failed")
+        return jsonify(error="پاسخ سرویس هوش مصنوعی قابل پردازش نبود."), 502
+
 
 @app.get("/api/stats")
 def stats():
