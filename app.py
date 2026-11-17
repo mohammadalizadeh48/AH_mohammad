@@ -120,7 +120,7 @@ def ai_chat():
                     for block in item.get("content", []):
                         if block.get("type") == "output_text" and block.get("text"):
                             parts.append(block["text"])
-            answer = "\\n".join(parts).strip()
+            answer = "\n".join(parts).strip()
         if not answer:
             app.logger.error("AI API returned no text; response id=%s", result.get("id"))
             return jsonify(error="پاسخ قابل‌نمایشی از سرویس هوش مصنوعی دریافت نشد. دوباره تلاش کن."), 502
