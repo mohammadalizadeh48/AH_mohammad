@@ -1,4 +1,4 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, csv
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, csv, re
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
@@ -11,7 +11,9 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=25*1024*1024)
 UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-GENERATED_DIR = Path(os.environ.get("GENERATED_FILES_DIR", str(BASE_DIR / "generated_files"))).resolve()
+GENERATED_DIR = Path(os.environ.get("GENERATED_FILES_DIR", str(Path(os.environ.get("TMPDIR", "/tmp")) / "mohammad_studio_generated_files"))).resolve()
+if GENERATED_DIR == BASE_DIR or BASE_DIR in GENERATED_DIR.parents:
+    raise RuntimeError("GENERATED_FILES_DIR must be outside the public application directory")
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 QR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 QR_MEDIA_EXTENSIONS = QR_IMAGE_EXTENSIONS | {".mp4", ".webm", ".mov", ".m4v"}
@@ -48,6 +50,21 @@ def stamp(): return datetime.now(timezone.utc).isoformat()
 def visitor():
     if not session.get("visitor_id"): session["visitor_id"]=secrets.token_urlsafe(20)
     return session["visitor_id"]
+
+def ai_session_rate_limit(bucket, limit, window_seconds):
+    """Basic per-signed-session throttle for public AI endpoints."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    key = "ai_rate_" + bucket
+    try:
+        recent = [int(value) for value in session.get(key, []) if now - int(value) < window_seconds]
+    except (TypeError, ValueError):
+        recent = []
+    if len(recent) >= limit:
+        retry_after = max(1, window_seconds - (now - recent[0]))
+        return False, retry_after
+    recent.append(now)
+    session[key] = recent[-limit:]
+    return True, 0
 
 @app.before_request
 def track():
@@ -94,6 +111,12 @@ def ai_models():
 
 @app.post("/api/ai/chat")
 def ai_chat():
+    allowed, retry_after = ai_session_rate_limit("chat", 30, 3600)
+    if not allowed:
+        response = jsonify(error="تعداد درخواست‌های دستیار در این مرورگر زیاد است. کمی بعد دوباره تلاش کن.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         return jsonify(error="دستیار هوشمند هنوز به OpenRouter متصل نشده است. مدیر سایت باید OPENROUTER_API_KEY را در تنظیمات محیطی سرور ثبت کند."), 503
@@ -247,6 +270,12 @@ def ai_chat():
 @app.post("/api/ai/image")
 def ai_generate_image():
     """Generate images only with the explicitly free OpenRouter image model."""
+    allowed, retry_after = ai_session_rate_limit("image", 3, 3600)
+    if not allowed:
+        response = jsonify(error="برای جلوگیری از سوءاستفاده، در هر مرورگر حداکثر ۳ تصویر در ساعت ساخته می‌شود.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         return jsonify(error="کلید OpenRouter روی سرور تنظیم نشده است."), 503
@@ -301,6 +330,12 @@ def ai_generate_image():
 @app.post("/api/ai/create-file")
 def ai_create_file():
     """Create office documents from user-provided text; never execute user code."""
+    allowed, retry_after = ai_session_rate_limit("office", 5, 3600)
+    if not allowed:
+        response = jsonify(error="در هر مرورگر حداکثر ۵ فایل در ساعت ساخته می‌شود.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     body = request.get_json(silent=True) or {}
     file_format = str(body.get("format") or "").lower().strip()
     title = str(body.get("title") or "خروجی محمد استودیو").strip()[:120]
@@ -315,6 +350,17 @@ def ai_create_file():
     token = uuid.uuid4().hex
     output_name = token + "." + file_format
     output_path = GENERATED_DIR / output_name
+    # Remove generated documents older than 24 hours to prevent unbounded disk growth.
+    now = datetime.now(timezone.utc).timestamp()
+    try:
+        for old_file in GENERATED_DIR.iterdir():
+            try:
+                if old_file.is_file() and now - old_file.stat().st_mtime > 86400:
+                    old_file.unlink(missing_ok=True)
+            except OSError:
+                app.logger.warning("Could not clean expired generated file: %s", old_file.name)
+    except OSError:
+        app.logger.exception("Could not inspect generated files directory")
     try:
         if file_format == "docx":
             from docx import Document
@@ -336,7 +382,14 @@ def ai_create_file():
             sheet.title = "داده‌ها"
             delimiter = "\t" if "\t" in content else ","
             for row in csv.reader(io.StringIO(content), delimiter=delimiter):
-                sheet.append(row)
+                safe_row = []
+                for value in row:
+                    stripped = value.lstrip()
+                    formula_like = stripped.startswith(("=", "+", "@")) or (
+                        stripped.startswith("-") and not re.match(r"^-\\d+(?:\\.\\d+)?$", stripped)
+                    )
+                    safe_row.append("'" + value if formula_like else value)
+                sheet.append(safe_row)
             for cell in sheet[1]:
                 cell.font = Font(bold=True, color="FFFFFF")
                 cell.fill = PatternFill("solid", fgColor="245A85")
