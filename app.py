@@ -1,4 +1,4 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, csv
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
@@ -11,6 +11,8 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=25*1024*1024)
 UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+GENERATED_DIR = Path(os.environ.get("GENERATED_FILES_DIR", str(BASE_DIR / "generated_files"))).resolve()
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 QR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 QR_MEDIA_EXTENSIONS = QR_IMAGE_EXTENSIONS | {".mp4", ".webm", ".mov", ".m4v"}
 
@@ -140,8 +142,19 @@ def ai_chat():
             if not data_url.startswith("data:" + mime + ";base64,"):
                 return jsonify(error="فرمت تصویر معتبر نیست."), 400
             image_part = {"type": "image_url", "image_url": {"url": data_url}}
+        elif Path(filename).suffix.lower() in {".py", ".js", ".html", ".css", ".json", ".txt", ".md"}:
+            try:
+                extracted = raw_file.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                return jsonify(error="فایل متنی باید با کدگذاری UTF-8 ذخیره شده باشد."), 422
+            if not extracted.strip():
+                return jsonify(error="فایل متنی خالی است."), 422
+            attachment_context = (
+                "محتوای فایل متنی/کدنویسی با نام " + filename +
+                " (این محتوا فقط برای بررسی است و نباید اجرا شود):\\n" + extracted[:18000]
+            )
         else:
-            return jsonify(error="فعلاً فقط فایل PDF و تصویر PNG/JPG/WEBP/GIF پشتیبانی می‌شود."), 400
+            return jsonify(error="فرمت پشتیبانی‌شده: PDF، تصویر، Python، JavaScript، HTML، CSS، JSON، TXT و MD."), 400
 
     safe_messages = []
     total_chars = 0
@@ -284,6 +297,98 @@ def ai_generate_image():
     except (urllib.error.URLError, TimeoutError, ValueError):
         app.logger.exception("Free image generation failed")
         return jsonify(error="ارتباط با مدل رایگان تصویر برقرار نشد."), 504
+
+@app.post("/api/ai/create-file")
+def ai_create_file():
+    """Create office documents from user-provided text; never execute user code."""
+    body = request.get_json(silent=True) or {}
+    file_format = str(body.get("format") or "").lower().strip()
+    title = str(body.get("title") or "خروجی محمد استودیو").strip()[:120]
+    content = str(body.get("content") or "").strip()
+    if file_format not in {"docx", "xlsx", "pptx"}:
+        return jsonify(error="فرمت فایل باید Word، Excel یا PowerPoint باشد."), 400
+    if not content:
+        return jsonify(error="محتوای فایل را وارد کن."), 400
+    if len(content) > 40000:
+        return jsonify(error="محتوای فایل حداکثر ۴۰ هزار نویسه باشد."), 413
+
+    token = uuid.uuid4().hex
+    output_name = token + "." + file_format
+    output_path = GENERATED_DIR / output_name
+    try:
+        if file_format == "docx":
+            from docx import Document
+            from docx.shared import Pt
+            document = Document()
+            document.add_heading(title or "سند", 0)
+            for line in content.splitlines():
+                document.add_paragraph(line)
+            for paragraph in document.paragraphs:
+                for run in paragraph.runs:
+                    run.font.name = "Tahoma"
+                    run.font.size = Pt(11)
+            document.save(str(output_path))
+        elif file_format == "xlsx":
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "داده‌ها"
+            delimiter = "\\t" if "\\t" in content else ","
+            for row in csv.reader(io.StringIO(content), delimiter=delimiter):
+                sheet.append(row)
+            for cell in sheet[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="245A85")
+                cell.alignment = Alignment(horizontal="center")
+            for column in sheet.columns:
+                letter = column[0].column_letter
+                width = min(max(max(len(str(cell.value or "")) for cell in column) + 2, 12), 42)
+                sheet.column_dimensions[letter].width = width
+            sheet.freeze_panes = "A2"
+            workbook.save(str(output_path))
+        else:
+            from pptx import Presentation
+            from pptx.util import Inches, Pt
+            presentation = Presentation()
+            lines = [line.strip() for line in content.splitlines() if line.strip()]
+            title_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+            title_slide.shapes.title.text = title or "ارائه محمد استودیو"
+            if len(title_slide.placeholders) > 1:
+                title_slide.placeholders[1].text = "ساخته‌شده با دستیار هوشمند محمد استودیو"
+            for start in range(0, len(lines), 7):
+                slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+                slide.shapes.title.text = lines[start][:100]
+                frame = slide.placeholders[1].text_frame
+                frame.clear()
+                for index, line in enumerate(lines[start + 1:start + 7] if start == 0 else lines[start:start + 7]):
+                    paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+                    paragraph.text = line
+                    paragraph.level = 0
+                    paragraph.font.size = Pt(22)
+            presentation.save(str(output_path))
+        return jsonify(
+            ok=True,
+            filename=title + "." + file_format,
+            url=url_for("ai_download_file", token=token, extension=file_format)
+        )
+    except Exception:
+        app.logger.exception("Office document generation failed")
+        output_path.unlink(missing_ok=True)
+        return jsonify(error="ساخت فایل انجام نشد. متن را کوتاه‌تر کن یا دوباره تلاش کن."), 500
+
+
+@app.get("/api/ai/download/<token>.<extension>")
+def ai_download_file(token, extension):
+    if not token.isalnum() or extension not in {"docx", "xlsx", "pptx"}:
+        abort(404)
+    filename = token + "." + extension
+    path = GENERATED_DIR / filename
+    if not path.is_file():
+        abort(404)
+    download_names = {"docx": "Mohammad-Studio.docx", "xlsx": "Mohammad-Studio.xlsx", "pptx": "Mohammad-Studio.pptx"}
+    return send_from_directory(GENERATED_DIR, filename, as_attachment=True, download_name=download_names[extension])
+
 
 @app.get("/api/stats")
 def stats():
