@@ -365,14 +365,25 @@ def ai_create_file():
         if file_format == "docx":
             from docx import Document
             from docx.shared import Pt
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
             document = Document()
             document.add_heading(title or "سند", 0)
             for line in content.splitlines():
                 document.add_paragraph(line)
             for paragraph in document.paragraphs:
+                paragraph.alignment = 2  # right aligned for Persian
+                p_pr = paragraph._p.get_or_add_pPr()
+                bidi = OxmlElement("w:bidi")
+                bidi.set(qn("w:val"), "1")
+                p_pr.append(bidi)
                 for run in paragraph.runs:
                     run.font.name = "Tahoma"
                     run.font.size = Pt(11)
+                    r_pr = run._element.get_or_add_rPr()
+                    rtl = OxmlElement("w:rtl")
+                    rtl.set(qn("w:val"), "1")
+                    r_pr.append(rtl)
             document.save(str(output_path))
         elif file_format == "xlsx":
             from openpyxl import Workbook
@@ -419,6 +430,9 @@ def ai_create_file():
                     paragraph.text = line
                     paragraph.level = 0
                     paragraph.font.size = Pt(22)
+                    paragraph.alignment = 2
+                    p_pr = paragraph._p.get_or_add_pPr()
+                    p_pr.set("rtl", "1")
             presentation.save(str(output_path))
         return jsonify(
             ok=True,
@@ -438,6 +452,12 @@ def ai_download_file(token, extension):
     filename = token + "." + extension
     path = GENERATED_DIR / filename
     if not path.is_file():
+        abort(404)
+    try:
+        if datetime.now(timezone.utc).timestamp() - path.stat().st_mtime > 86400:
+            path.unlink(missing_ok=True)
+            abort(404)
+    except OSError:
         abort(404)
     download_names = {"docx": "Mohammad-Studio.docx", "xlsx": "Mohammad-Studio.xlsx", "pptx": "Mohammad-Studio.pptx"}
     return send_from_directory(GENERATED_DIR, filename, as_attachment=True, download_name=download_names[extension])
