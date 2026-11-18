@@ -180,10 +180,12 @@ $("#aiAttachButton")?.addEventListener("click", () => aiFileInput?.click());
 aiFileInput?.addEventListener("change", () => {
   const file = aiFileInput.files[0];
   if (!file) { aiSelectedAttachment = null; aiFileStatus.textContent = ""; return; }
-  const allowed = ["application/pdf","image/png","image/jpeg","image/webp","image/gif"];
-  if (!allowed.includes(file.type) || file.size > 10 * 1024 * 1024) {
+  const codeExtensions = [".py",".js",".html",".css",".json",".txt",".md"];
+  const extension = "." + file.name.split(".").pop().toLowerCase();
+  const allowed = ["application/pdf","image/png","image/jpeg","image/webp","image/gif","text/plain","text/x-python","text/javascript","text/html","text/css","application/json"];
+  if ((!allowed.includes(file.type) && !codeExtensions.includes(extension)) || file.size > 10 * 1024 * 1024) {
     aiFileInput.value = ""; aiSelectedAttachment = null;
-    message(aiNotice, "فقط PDF یا تصویر PNG/JPG/WEBP/GIF تا حجم ۱۰ مگابایت قابل ارسال است.", false);
+    message(aiNotice, "PDF، تصویر یا فایل کدنویسی Python/JS/HTML/CSS/JSON/TXT/MD تا حجم ۱۰ مگابایت انتخاب کن.", false);
     aiFileStatus.textContent = ""; return;
   }
   aiSelectedAttachment = file;
@@ -255,6 +257,47 @@ aiImageButton?.addEventListener("click", async () => {
   } catch (error) { message(aiImageOutput, error.message, false); }
   finally { aiImageButton.disabled = false; aiImageButton.textContent = "ساخت تصویر رایگان"; }
 });
+// Office-file creation panel; added dynamically to preserve the existing page layout.
+const aiOfficePanel = document.createElement("article");
+aiOfficePanel.className = "studio-card tool-card";
+aiOfficePanel.style.margin = "14px 18px";
+aiOfficePanel.innerHTML = `
+  <span class="studio-kicker">OFFICE FILE STUDIO</span>
+  <h3>ساخت فایل Word، Excel و PowerPoint</h3>
+  <p>متن یا داده‌ها را وارد کن و فایل قابل دانلود بساز.</p>
+  <label for="aiOfficeFormat">نوع فایل</label>
+  <select id="aiOfficeFormat">
+    <option value="docx">Word (.docx)</option>
+    <option value="xlsx">Excel (.xlsx) — هر سطر یک ردیف، ستون‌ها با ویرگول یا Tab</option>
+    <option value="pptx">PowerPoint (.pptx) — هر سطر یک نکته یا عنوان اسلاید</option>
+  </select>
+  <label for="aiOfficeTitle">عنوان فایل</label>
+  <input id="aiOfficeTitle" maxlength="120" value="خروجی محمد استودیو" placeholder="عنوان فایل">
+  <label for="aiOfficeContent">محتوا</label>
+  <textarea id="aiOfficeContent" rows="6" maxlength="40000" placeholder="متن یا داده‌های موردنظر را وارد کن..."></textarea>
+  <button type="button" id="aiOfficeCreate" class="studio-btn primary">ساخت و دانلود فایل</button>
+  <output id="aiOfficeStatus" class="tool-output" aria-live="polite"></output>
+  <p class="fine-print">فایل‌ها روی سرور ساخته می‌شوند؛ از واردکردن رمزها و اطلاعات محرمانه خودداری کن.</p>
+`;
+aiImageOutput.parentElement.insertAdjacentElement("afterend", aiOfficePanel);
+$("#aiOfficeCreate")?.addEventListener("click", async () => {
+  const button = $("#aiOfficeCreate"), status = $("#aiOfficeStatus");
+  const format = $("#aiOfficeFormat").value;
+  const title = $("#aiOfficeTitle").value.trim();
+  const content = $("#aiOfficeContent").value.trim();
+  if (!content) { message(status, "ابتدا محتوای فایل را وارد کن.", false); return; }
+  button.disabled = true; button.textContent = "در حال ساخت فایل…";
+  try {
+    const result = await api("/api/ai/create-file", {method:"POST", body:JSON.stringify({format,title,content})});
+    const link = document.createElement("a");
+    link.href = result.url; link.textContent = "دانلود " + result.filename;
+    link.className = "ai-manage-btn"; link.style.display = "inline-block"; link.style.marginTop = "8px";
+    status.replaceChildren(document.createTextNode("فایل آماده شد. "), link);
+  } catch (error) { message(status, error.message, false); }
+  finally { button.disabled = false; button.textContent = "ساخت و دانلود فایل"; }
+});
+if (aiFileInput) aiFileInput.accept = ".pdf,image/png,image/jpeg,image/webp,image/gif,.py,.js,.html,.css,.json,.txt,.md";
+$("#aiAttachButton")?.replaceChildren(document.createTextNode("📎 پیوست PDF، تصویر یا فایل کد"));
 $("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
 $$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
 $("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiConversationSelect.value="";aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
