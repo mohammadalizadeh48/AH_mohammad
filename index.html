@@ -34,10 +34,17 @@
     <label>گفتگوهای ذخیره‌شده<select id="aiConversationSelect" aria-label="گفتگوهای ذخیره‌شده"><option value="">انتخاب گفتگو</option></select></label>
     <div class="ai-management"><button type="button" id="aiRenameChat" class="ai-manage-btn">تغییر نام</button><button type="button" id="aiDeleteChat" class="ai-manage-btn danger">حذف گفتگو</button></div>
   </div>
+  <div class="ai-image-tool">
+    <div><span class="studio-kicker">FREE IMAGE LAB</span><h3>ساخت تصویر با هوش مصنوعی</h3><p>فقط مدل رایگان امتحان می‌شود؛ اگر رایگان نباشد، مدل پولی جایگزین نمی‌شود.</p></div>
+    <textarea id="aiImagePrompt" rows="2" maxlength="1800" placeholder="تصویر موردنظرت را توصیف کن..."></textarea>
+    <button type="button" id="aiImageButton" class="studio-btn primary">ساخت تصویر رایگان</button>
+    <div id="aiImageOutput" class="ai-image-output" aria-live="polite"></div>
+  </div>
   <div class="ai-welcome" id="aiWelcome"><div class="ai-welcome-mark">M✦</div><h3>سلام! چطور می‌توانم کمکت کنم؟</h3><p>سؤالت را بنویس؛ می‌توانم در یادگیری، برنامه‌نویسی، نوشتن، ترجمه و ایده‌پردازی همراهت باشم.</p>
   <div class="ai-suggestions"><button type="button" data-ai-prompt="یک برنامه یادگیری پایتون برای مبتدی‌ها طراحی کن.">یادگیری برنامه‌نویسی</button><button type="button" data-ai-prompt="این متن را حرفه‌ای‌تر و روان‌تر بازنویسی کن: ">بازنویسی متن</button><button type="button" data-ai-prompt="برای یک وب‌سایت شخصی چند ایده کاربردی پیشنهاد بده.">ایده‌پردازی</button></div></div>
   <div class="ai-messages" id="aiMessages" aria-live="polite" aria-label="گفتگوی شما با دستیار"></div>
-  <form class="ai-composer" id="aiChatForm"><textarea id="aiInput" rows="1" maxlength="6000" placeholder="پیامت را برای دستیار بنویس..." aria-label="پیام شما" required></textarea><button type="submit" id="aiSend" class="studio-btn primary">ارسال ↗</button></form>
+  <div class="ai-file-row"><input type="file" id="aiFileInput" accept=".pdf,image/png,image/jpeg,image/webp,image/gif" hidden><button type="button" id="aiAttachButton" class="ai-manage-btn" aria-label="پیوست فایل">📎 پیوست PDF یا تصویر</button><span id="aiFileStatus" class="ai-file-status"></span></div>
+  <form class="ai-composer" id="aiChatForm"><textarea id="aiInput" rows="1" maxlength="6000" placeholder="پیامت را برای دستیار بنویس..." aria-label="پیام شما"></textarea><button type="submit" id="aiSend" class="studio-btn primary">ارسال ↗</button></form>
   <div class="ai-disclaimer">تاریخچه گفتگوها در همین مرورگر ذخیره می‌شود. مدل‌های رایگان از طریق OpenRouter در دسترس هستند.</div>
   <div id="aiChatNotice" class="ai-chat-notice" role="status" aria-live="polite"></div>
 </div>

@@ -98,6 +98,29 @@ function addAiMessage(role, text) {
   const body = document.createElement("p");
   body.textContent = text;
   item.append(label, body);
+  if (role === "assistant") {
+    const pdfButton = document.createElement("button");
+    pdfButton.type = "button";
+    pdfButton.className = "ai-manage-btn ai-pdf-export";
+    pdfButton.textContent = "ذخیره پاسخ به PDF";
+    pdfButton.addEventListener("click", () => {
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) { message(aiNotice, "اجازه بازشدن پنجره چاپ را بده و دوباره تلاش کن.", false); return; }
+      const doc = printWindow.document;
+      doc.documentElement.lang = "fa";
+      doc.documentElement.dir = "rtl";
+      doc.title = "پاسخ دستیار محمد استودیو";
+      const style = doc.createElement("style");
+      style.textContent = "body{font-family:Tahoma,Arial,sans-serif;direction:rtl;text-align:right;line-height:2.1;padding:36px;color:#172033;white-space:pre-wrap}h1{font-size:20px;border-bottom:1px solid #ddd;padding-bottom:12px}main{font-size:14px}";
+      const heading = doc.createElement("h1"); heading.textContent = "پاسخ دستیار هوشمند محمد استودیو";
+      const main = doc.createElement("main"); main.textContent = body.textContent;
+      doc.body.append(heading, main);
+      doc.head.append(style);
+      printWindow.focus();
+      printWindow.print();
+    });
+    item.append(pdfButton);
+  }
   aiMessagesBox.append(item);
   aiMessagesBox.scrollTop = aiMessagesBox.scrollHeight;
   return item;
@@ -128,6 +151,7 @@ async function loadAiModels() {
       const option = document.createElement("option");
       option.value = model.id;
       option.textContent = model.name || model.id;
+      option.dataset.vision = model.vision ? "true" : "false";
       aiModelSelect.append(option);
     });
     if (![...aiModelSelect.options].some(option => option.value === previous)) aiSelectedModel = "openrouter/free";
@@ -149,23 +173,57 @@ aiModelSelect.addEventListener("change", () => {
 aiConversationSelect.addEventListener("change", () => {
   if (aiConversationSelect.value) restoreAiConversation(aiConversationSelect.value);
 });
+let aiSelectedAttachment = null;
+const aiFileInput = $("#aiFileInput");
+const aiFileStatus = $("#aiFileStatus");
+$("#aiAttachButton")?.addEventListener("click", () => aiFileInput?.click());
+aiFileInput?.addEventListener("change", () => {
+  const file = aiFileInput.files[0];
+  if (!file) { aiSelectedAttachment = null; aiFileStatus.textContent = ""; return; }
+  const allowed = ["application/pdf","image/png","image/jpeg","image/webp","image/gif"];
+  if (!allowed.includes(file.type) || file.size > 10 * 1024 * 1024) {
+    aiFileInput.value = ""; aiSelectedAttachment = null;
+    message(aiNotice, "فقط PDF یا تصویر PNG/JPG/WEBP/GIF تا حجم ۱۰ مگابایت قابل ارسال است.", false);
+    aiFileStatus.textContent = ""; return;
+  }
+  aiSelectedAttachment = file;
+  aiFileStatus.textContent = "فایل انتخاب‌شده: " + file.name;
+});
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("خواندن فایل ممکن نشد."));
+    reader.readAsDataURL(file);
+  });
+}
 async function sendAiMessage(text) {
   const prompt = String(text || "").trim();
-  if (!prompt || aiBusy) return;
+  const attachmentFile = aiSelectedAttachment;
+  if ((!prompt && !attachmentFile) || aiBusy) return;
+  if (attachmentFile && attachmentFile.type.startsWith("image/") && aiModelSelect.selectedOptions[0]?.dataset.vision !== "true") {
+    message(aiNotice, "برای بررسی تصویر، از فهرست مدل‌ها مدلی را انتخاب کن که پشتیبانی تصویر دارد.", false);
+    return;
+  }
   if (prompt.length > 6000) { message(aiNotice, "پیام حداکثر می‌تواند ۶۰۰۰ نویسه باشد.", false); return; }
-  ensureAiConversation(prompt);
+  const visiblePrompt = prompt || "لطفاً فایل پیوست‌شده را بررسی کن.";
+  ensureAiConversation(visiblePrompt);
   aiWelcome.hidden = true;
   aiNotice.textContent = "";
-  aiMessages.push({role:"user",content:prompt});
-  addAiMessage("user",prompt);
+  aiMessages.push({role:"user",content:visiblePrompt + (attachmentFile ? "\\n[فایل پیوست: " + attachmentFile.name + "]" : "")});
+  addAiMessage("user",visiblePrompt + (attachmentFile ? "\\n📎 " + attachmentFile.name : ""));
   persistActiveAiConversation();
   aiInput.value = "";
   aiBusy = true;
   aiSend.disabled = true;
   aiSend.textContent = "در حال پاسخ…";
-  const pending = addAiMessage("assistant","در حال فکر کردن…");
+  const pending = addAiMessage("assistant","در حال بررسی…");
   try {
-    const data = await api("/api/ai/chat",{method:"POST",body:JSON.stringify({messages:aiMessages.slice(-20),model:aiSelectedModel})});
+    const attachment = attachmentFile ? {name:attachmentFile.name,type:attachmentFile.type,data:await fileAsDataUrl(attachmentFile)} : null;
+    const data = await api("/api/ai/chat",{method:"POST",body:JSON.stringify({messages:aiMessages.slice(-20).map(m=>({role:m.role,content:m.content.replace(/\\n\\[فایل پیوست:.*?\\]$/,"")})),model:aiSelectedModel,attachment})});
+    aiSelectedAttachment = null;
+    if (aiFileInput) aiFileInput.value = "";
+    if (aiFileStatus) aiFileStatus.textContent = "";
     if (!data.reply) throw new Error("پاسخ خالی از سرور دریافت شد.");
     aiMessages.push({role:"assistant",content:data.reply});
     pending.querySelector("p").textContent = data.reply;
@@ -184,6 +242,19 @@ async function sendAiMessage(text) {
   }
 }
 $("#aiChatForm")?.addEventListener("submit",event=>{event.preventDefault();sendAiMessage(aiInput.value);});
+const aiImagePrompt = $("#aiImagePrompt"), aiImageButton = $("#aiImageButton"), aiImageOutput = $("#aiImageOutput");
+aiImageButton?.addEventListener("click", async () => {
+  const prompt = aiImagePrompt.value.trim();
+  if (prompt.length < 3) { message(aiImageOutput, "توضیح تصویر را وارد کن.", false); return; }
+  aiImageButton.disabled = true; aiImageButton.textContent = "در حال ساخت…"; aiImageOutput.replaceChildren();
+  try {
+    const result = await api("/api/ai/image", {method:"POST", body:JSON.stringify({prompt})});
+    const img = document.createElement("img"); img.src = result.image; img.alt = prompt; img.className = "ai-generated-image";
+    const link = document.createElement("a"); link.href = result.image; link.download = "mohammad-studio-image.png"; link.textContent = "باز کردن / ذخیره تصویر"; link.className = "ai-manage-btn";
+    aiImageOutput.append(img, link);
+  } catch (error) { message(aiImageOutput, error.message, false); }
+  finally { aiImageButton.disabled = false; aiImageButton.textContent = "ساخت تصویر رایگان"; }
+});
 $("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
 $$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
 $("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiConversationSelect.value="";aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});

@@ -81,7 +81,8 @@ def ai_models():
             except (TypeError, ValueError):
                 free = False
             if isinstance(model_id, str) and model_id.endswith(":free") and free:
-                models.append({"id": model_id, "name": str(item.get("name") or model_id)})
+                modalities = (item.get("architecture") or {}).get("input_modalities") or []
+                models.append({"id": model_id, "name": str(item.get("name") or model_id), "vision": "image" in modalities})
         # Keep the selector compact and deterministic.
         models = models[:101]
     except (urllib.error.URLError, TimeoutError, ValueError):
@@ -105,6 +106,43 @@ def ai_chat():
     if len(messages) > 20:
         messages = messages[-20:]
 
+    attachment = body.get("attachment")
+    attachment_context = None
+    image_part = None
+    if attachment:
+        if not isinstance(attachment, dict):
+            return jsonify(error="فایل پیوست معتبر نیست."), 400
+        filename = str(attachment.get("name") or "file").strip()[:120]
+        mime = str(attachment.get("type") or "").lower()
+        data_url = attachment.get("data")
+        if not isinstance(data_url, str) or "," not in data_url or len(data_url) > 14 * 1024 * 1024:
+            return jsonify(error="حجم یا محتوای فایل معتبر نیست؛ حداکثر حجم فایل ۱۰ مگابایت است."), 400
+        try:
+            encoded = data_url.split(",", 1)[1]
+            raw_file = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return jsonify(error="خواندن فایل پیوست ممکن نشد."), 400
+        if len(raw_file) > 10 * 1024 * 1024:
+            return jsonify(error="حجم فایل بیشتر از ۱۰ مگابایت است."), 413
+        if mime == "application/pdf" or filename.lower().endswith(".pdf"):
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(raw_file))
+                extracted = "\n".join((page.extract_text() or "") for page in reader.pages[:30])
+                extracted = extracted.strip()
+                if not extracted:
+                    return jsonify(error="از این PDF متنی استخراج نشد؛ احتمالاً اسکن تصویری است. لطفاً نسخه متنی یا تصویر صفحه را ارسال کن."), 422
+                attachment_context = "محتوای استخراج‌شده از فایل PDF با نام " + filename + ":\n" + extracted[:18000]
+            except Exception:
+                app.logger.exception("PDF text extraction failed")
+                return jsonify(error="خواندن PDF ممکن نشد. فایل سالم و غیررمزگذاری‌شده‌ای ارسال کن."), 422
+        elif mime in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+            if not data_url.startswith("data:" + mime + ";base64,"):
+                return jsonify(error="فرمت تصویر معتبر نیست."), 400
+            image_part = {"type": "image_url", "image_url": {"url": data_url}}
+        else:
+            return jsonify(error="فعلاً فقط فایل PDF و تصویر PNG/JPG/WEBP/GIF پشتیبانی می‌شود."), 400
+
     safe_messages = []
     total_chars = 0
     for item in messages:
@@ -125,6 +163,13 @@ def ai_chat():
         return jsonify(error="آخرین پیام باید پیام شما باشد."), 400
     if total_chars > 18000:
         return jsonify(error="گفتگو بیش از حد طولانی است. یک گفتگوی جدید شروع کن."), 400
+    if attachment_context:
+        safe_messages[-1]["content"] += "\n\n" + attachment_context
+    if image_part:
+        safe_messages[-1]["content"] = [
+            {"type": "text", "text": safe_messages[-1]["content"]},
+            image_part
+        ]
 
     payload = {
         "model": selected_model,
@@ -134,12 +179,13 @@ def ai_chat():
                 "content": (
                     "تو دستیار هوش مصنوعی رسمی محمد استودیو هستی. به زبان فارسی روان، محترمانه، دقیق و کاربردی پاسخ بده؛ "
                     "اگر کاربر به زبان دیگری نوشت، به همان زبان پاسخ بده. اگر پاسخ را نمی‌دانی، صادقانه بگو. "
-                    "برای موضوعات فنی مراحل را روشن و ایمن توضیح بده. اطلاعات یا دسترسی‌ای را که نداری ادعا نکن."
+                    "برای موضوعات فنی مراحل را روشن و ایمن توضیح بده. اطلاعات یا دسترسی‌ای را که نداری ادعا نکن. "
+                    "اگر فایلی پیوست شده، محتوای آن را با دقت بررسی کن و فقط بر اساس محتوای قابل مشاهده یا استخراج‌شده پاسخ بده."
                 )
             },
             *safe_messages
         ],
-        "max_tokens": 1200
+        "max_tokens": 1600
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -183,6 +229,61 @@ def ai_chat():
     except (ValueError, KeyError, TypeError):
         app.logger.exception("OpenRouter response parsing failed")
         return jsonify(error="پاسخ سرویس هوش مصنوعی قابل پردازش نبود."), 502
+
+
+@app.post("/api/ai/image")
+def ai_generate_image():
+    """Generate images only with the explicitly free OpenRouter image model."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return jsonify(error="کلید OpenRouter روی سرور تنظیم نشده است."), 503
+    body = request.get_json(silent=True) or {}
+    prompt = str(body.get("prompt") or "").strip()
+    if len(prompt) < 3:
+        return jsonify(error="توضیح تصویر را کامل وارد کن."), 400
+    if len(prompt) > 1800:
+        return jsonify(error="توضیح تصویر حداکثر ۱۸۰۰ نویسه باشد."), 400
+
+    # Never fall back to a paid model. This free endpoint may be withdrawn by its provider.
+    payload = {
+        "model": "recraft/recraft-v4.1-flash-v2:free",
+        "prompt": prompt
+    }
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/images",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://mohammmad-jyr-mohammmad.runflare.cloud",
+            "X-Title": "Mohammad Studio"
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=100) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        items = result.get("data") or []
+        image = items[0] if items else {}
+        encoded = image.get("b64_json")
+        if encoded:
+            media_type = image.get("media_type") or "image/png"
+            return jsonify(image="data:" + media_type + ";base64," + encoded, model=payload["model"])
+        image_url = image.get("url")
+        if image_url and image_url.startswith("https://"):
+            return jsonify(image=image_url, model=payload["model"])
+        return jsonify(error="مدل رایگان تصویر خروجی قابل‌نمایشی برنگرداند."), 502
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", "replace")
+        app.logger.error("OpenRouter free image API HTTP error %s: %s", error.code, detail[:1000])
+        if error.code == 402:
+            return jsonify(error="این مدل رایگان دیگر در دسترس نیست یا ارائه‌دهنده برای آن هزینه می‌خواهد؛ هیچ مدل پولی جایگزین نشد."), 402
+        if error.code == 429:
+            return jsonify(error="محدودیت مدل رایگان تصویر فعال شده است. بعداً دوباره تلاش کن."), 429
+        return jsonify(error="مدل رایگان تصویر فعلاً پاسخ نمی‌دهد؛ هیچ هزینه‌ای برای مدل پولی انجام نشد."), 502
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        app.logger.exception("Free image generation failed")
+        return jsonify(error="ارتباط با مدل رایگان تصویر برقرار نشد."), 504
 
 @app.get("/api/stats")
 def stats():
