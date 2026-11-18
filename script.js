@@ -25,7 +25,70 @@ $("#decodeQr")?.addEventListener("click",async()=>{const file=$("#qrDecodeFile")
 
 const aiMessages = [];
 let aiBusy = false;
+const AI_HISTORY_KEY = "mohammadStudioAiConversationsV1";
+const AI_MODEL_KEY = "mohammadStudioAiModelV1";
 const aiMessagesBox = $("#aiMessages"), aiWelcome = $("#aiWelcome"), aiInput = $("#aiInput"), aiSend = $("#aiSend"), aiNotice = $("#aiChatNotice");
+const aiModelSelect = $("#aiModelSelect"), aiConversationSelect = $("#aiConversationSelect");
+let aiConversations = [];
+let activeConversationId = null;
+let aiSelectedModel = localStorage.getItem(AI_MODEL_KEY) || "openrouter/free";
+function loadAiHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
+    return Array.isArray(value) ? value.filter(x => x && typeof x.id === "string" && Array.isArray(x.messages)) : [];
+  } catch (error) {
+    console.warn("AI history could not be read", error);
+    return [];
+  }
+}
+function saveAiHistory() {
+  try {
+    aiConversations.sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    aiConversations = aiConversations.slice(0,30);
+    localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(aiConversations));
+  } catch (error) {
+    message(aiNotice, "ذخیره تاریخچه ممکن نشد؛ فضای ذخیره‌سازی مرورگر را بررسی کن.", false);
+  }
+}
+function renderAiConversationList() {
+  const current = activeConversationId || "";
+  aiConversationSelect.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "انتخاب گفتگو";
+  aiConversationSelect.append(placeholder);
+  aiConversations.sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).forEach(conversation => {
+    const option = document.createElement("option");
+    option.value = conversation.id;
+    option.textContent = conversation.title || "گفتگوی بدون عنوان";
+    aiConversationSelect.append(option);
+  });
+  aiConversationSelect.value = current;
+}
+function activeAiConversation() {
+  return aiConversations.find(item => item.id === activeConversationId) || null;
+}
+function persistActiveAiConversation() {
+  const conversation = activeAiConversation();
+  if (!conversation) return;
+  conversation.messages = aiMessages.slice(-40);
+  conversation.model = aiSelectedModel;
+  conversation.updatedAt = Date.now();
+  saveAiHistory();
+  renderAiConversationList();
+}
+function ensureAiConversation(firstPrompt) {
+  let conversation = activeAiConversation();
+  if (!conversation) {
+    conversation = {id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)), title: firstPrompt.slice(0,42), model: aiSelectedModel, messages: [], updatedAt: Date.now()};
+    aiConversations.unshift(conversation);
+    activeConversationId = conversation.id;
+  }
+  if (!conversation.messages.length && firstPrompt) conversation.title = firstPrompt.replace(/\s+/g," ").slice(0,42);
+  conversation.model = aiSelectedModel;
+  renderAiConversationList();
+  return conversation;
+}
 function addAiMessage(role, text) {
   const item = document.createElement("article");
   item.className = "ai-message " + (role === "user" ? "ai-user-message" : "ai-assistant-message");
@@ -39,27 +102,78 @@ function addAiMessage(role, text) {
   aiMessagesBox.scrollTop = aiMessagesBox.scrollHeight;
   return item;
 }
+function restoreAiConversation(id) {
+  if (aiBusy) return;
+  const conversation = aiConversations.find(item => item.id === id);
+  if (!conversation) return;
+  activeConversationId = conversation.id;
+  aiMessages.splice(0, aiMessages.length, ...conversation.messages.slice(-40));
+  aiMessagesBox.replaceChildren();
+  aiMessages.forEach(item => addAiMessage(item.role, item.content));
+  aiWelcome.hidden = aiMessages.length > 0;
+  aiSelectedModel = conversation.model || "openrouter/free";
+  aiModelSelect.value = aiSelectedModel;
+  localStorage.setItem(AI_MODEL_KEY, aiSelectedModel);
+  aiNotice.textContent = "";
+  renderAiConversationList();
+}
+async function loadAiModels() {
+  try {
+    const data = await api("/api/ai/models");
+    const models = Array.isArray(data.models) ? data.models : [];
+    const previous = aiSelectedModel;
+    aiModelSelect.replaceChildren();
+    models.forEach(model => {
+      if (!model || typeof model.id !== "string") return;
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.name || model.id;
+      aiModelSelect.append(option);
+    });
+    if (![...aiModelSelect.options].some(option => option.value === previous)) aiSelectedModel = "openrouter/free";
+    aiModelSelect.value = aiSelectedModel;
+    localStorage.setItem(AI_MODEL_KEY, aiSelectedModel);
+  } catch (error) {
+    console.warn("AI model list could not be loaded", error);
+  }
+}
+aiConversations = loadAiHistory();
+renderAiConversationList();
+aiModelSelect.value = aiSelectedModel;
+aiModelSelect.addEventListener("change", () => {
+  aiSelectedModel = aiModelSelect.value || "openrouter/free";
+  localStorage.setItem(AI_MODEL_KEY, aiSelectedModel);
+  const conversation = activeAiConversation();
+  if (conversation) { conversation.model = aiSelectedModel; persistActiveAiConversation(); }
+});
+aiConversationSelect.addEventListener("change", () => {
+  if (aiConversationSelect.value) restoreAiConversation(aiConversationSelect.value);
+});
 async function sendAiMessage(text) {
   const prompt = String(text || "").trim();
   if (!prompt || aiBusy) return;
   if (prompt.length > 6000) { message(aiNotice, "پیام حداکثر می‌تواند ۶۰۰۰ نویسه باشد.", false); return; }
+  ensureAiConversation(prompt);
   aiWelcome.hidden = true;
   aiNotice.textContent = "";
   aiMessages.push({role:"user",content:prompt});
   addAiMessage("user",prompt);
+  persistActiveAiConversation();
   aiInput.value = "";
   aiBusy = true;
   aiSend.disabled = true;
   aiSend.textContent = "در حال پاسخ…";
   const pending = addAiMessage("assistant","در حال فکر کردن…");
   try {
-    const data = await api("/api/ai/chat",{method:"POST",body:JSON.stringify({messages:aiMessages})});
+    const data = await api("/api/ai/chat",{method:"POST",body:JSON.stringify({messages:aiMessages.slice(-20),model:aiSelectedModel})});
     if (!data.reply) throw new Error("پاسخ خالی از سرور دریافت شد.");
     aiMessages.push({role:"assistant",content:data.reply});
     pending.querySelector("p").textContent = data.reply;
+    persistActiveAiConversation();
   } catch (error) {
     pending.remove();
     aiMessages.pop();
+    persistActiveAiConversation();
     message(aiNotice,error.message,false);
   } finally {
     aiBusy = false;
@@ -72,7 +186,11 @@ async function sendAiMessage(text) {
 $("#aiChatForm")?.addEventListener("submit",event=>{event.preventDefault();sendAiMessage(aiInput.value);});
 $("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
 $("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
-$("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
+$("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiConversationSelect.value="";aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
+$("#aiRenameChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا یک گفتگوی ذخیره‌شده را انتخاب کن.",false);return;}const title=window.prompt("نام جدید گفتگو را وارد کن:",conversation.title||"گفتگوی جدید");if(title&&title.trim()){conversation.title=title.trim().slice(0,60);conversation.updatedAt=Date.now();saveAiHistory();renderAiConversationList();}});
+$("#aiDeleteChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا گفتگویی را برای حذف انتخاب کن.",false);return;}if(!window.confirm("این گفتگو و تاریخچه آن حذف شود؟"))return;aiConversations=aiConversations.filter(item=>item.id!==activeConversationId);activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگو حذف شد.";renderAiConversationList();saveAiHistory();});
+loadAiModels();
+if (aiConversations.length) restoreAiConversation(aiConversations[0].id);
 $("#shortenUrl")?.addEventListener("click",async()=>{const out=$("#shortUrlOutput");try{const d=await api("/api/shorten",{method:"POST",body:JSON.stringify({url:$("#longUrl").value.trim()})});out.textContent=d.url}catch(e){message(out,e.message,false)}});
 $("#toUpper")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toUpperCase());
 $("#toLower")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toLowerCase());

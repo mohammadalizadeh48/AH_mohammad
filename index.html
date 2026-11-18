@@ -29,11 +29,16 @@
 <div class="section-title"><div><span class="studio-kicker">ARTIFICIAL INTELLIGENCE</span><h2>دستیار <span class="neon-text">هوشمند</span></h2></div><span class="live-count">MOHAMMAD AI</span></div>
 <div class="ai-chat-panel">
   <div class="ai-chat-head"><div class="ai-avatar">✧</div><div><h3>دستیار هوش مصنوعی محمد استودیو</h3><p><span class="ai-status-dot"></span> آماده گفتگو</p></div><button type="button" class="ai-clear-btn" id="aiNewChat">گفتگوی جدید</button></div>
+  <div class="ai-toolbar">
+    <label>مدل هوش مصنوعی<select id="aiModelSelect" aria-label="انتخاب مدل"><option value="openrouter/free">انتخاب خودکار مدل رایگان</option></select></label>
+    <label>گفتگوهای ذخیره‌شده<select id="aiConversationSelect" aria-label="گفتگوهای ذخیره‌شده"><option value="">انتخاب گفتگو</option></select></label>
+    <div class="ai-management"><button type="button" id="aiRenameChat" class="ai-manage-btn">تغییر نام</button><button type="button" id="aiDeleteChat" class="ai-manage-btn danger">حذف گفتگو</button></div>
+  </div>
   <div class="ai-welcome" id="aiWelcome"><div class="ai-welcome-mark">M✦</div><h3>سلام! چطور می‌توانم کمکت کنم؟</h3><p>سؤالت را بنویس؛ می‌توانم در یادگیری، برنامه‌نویسی، نوشتن، ترجمه و ایده‌پردازی همراهت باشم.</p>
   <div class="ai-suggestions"><button type="button" data-ai-prompt="یک برنامه یادگیری پایتون برای مبتدی‌ها طراحی کن.">یادگیری برنامه‌نویسی</button><button type="button" data-ai-prompt="این متن را حرفه‌ای‌تر و روان‌تر بازنویسی کن: ">بازنویسی متن</button><button type="button" data-ai-prompt="برای یک وب‌سایت شخصی چند ایده کاربردی پیشنهاد بده.">ایده‌پردازی</button></div></div>
   <div class="ai-messages" id="aiMessages" aria-live="polite" aria-label="گفتگوی شما با دستیار"></div>
   <form class="ai-composer" id="aiChatForm"><textarea id="aiInput" rows="1" maxlength="6000" placeholder="پیامت را برای دستیار بنویس..." aria-label="پیام شما" required></textarea><button type="submit" id="aiSend" class="studio-btn primary">ارسال ↗</button></form>
-  <div class="ai-disclaimer">پاسخ‌ها با هوش مصنوعی تولید می‌شوند؛ اطلاعات مهم را بررسی کن. گفتگو فقط تا زمان باز بودن این صفحه نگهداری می‌شود.</div>
+  <div class="ai-disclaimer">تاریخچه گفتگوها در همین مرورگر ذخیره می‌شود. مدل‌های رایگان از طریق OpenRouter در دسترس هستند.</div>
   <div id="aiChatNotice" class="ai-chat-notice" role="status" aria-live="polite"></div>
 </div>
 </section>

@@ -59,6 +59,36 @@ def home(): return app.send_static_file("index.html")
 @app.get("/api/site")
 def site(): return jsonify(load_data())
 
+@app.get("/api/ai/models")
+def ai_models():
+    """Return only free OpenRouter models; never expose the API key."""
+    models = [{"id": "openrouter/free", "name": "انتخاب خودکار مدل رایگان"}]
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/models",
+        headers={"HTTP-Referer": "https://mohammmad-jyr-mohammmad.runflare.cloud", "X-Title": "Mohammad Studio"},
+        method="GET"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        for item in result.get("data", []):
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            pricing = item.get("pricing") or {}
+            try:
+                free = float(pricing.get("prompt", -1)) == 0 and float(pricing.get("completion", -1)) == 0
+            except (TypeError, ValueError):
+                free = False
+            if isinstance(model_id, str) and model_id.endswith(":free") and free:
+                models.append({"id": model_id, "name": str(item.get("name") or model_id)})
+        # Keep the selector compact and deterministic.
+        models = models[:101]
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        app.logger.exception("Could not load OpenRouter model catalog")
+    return jsonify(models=models, source="openrouter")
+
+
 @app.post("/api/ai/chat")
 def ai_chat():
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
@@ -66,6 +96,9 @@ def ai_chat():
         return jsonify(error="دستیار هوشمند هنوز به OpenRouter متصل نشده است. مدیر سایت باید OPENROUTER_API_KEY را در تنظیمات محیطی سرور ثبت کند."), 503
 
     body = request.get_json(silent=True) or {}
+    selected_model = str(body.get("model") or "openrouter/free").strip()
+    if selected_model != "openrouter/free" and (not selected_model.endswith(":free") or len(selected_model) > 200):
+        return jsonify(error="فقط مدل‌های رایگان فهرست‌شده قابل انتخاب هستند."), 400
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
         return jsonify(error="پیام خود را وارد کن."), 400
@@ -94,7 +127,7 @@ def ai_chat():
         return jsonify(error="گفتگو بیش از حد طولانی است. یک گفتگوی جدید شروع کن."), 400
 
     payload = {
-        "model": os.environ.get("OPENROUTER_MODEL", "openrouter/free").strip() or "openrouter/free",
+        "model": selected_model,
         "messages": [
             {
                 "role": "system",
