@@ -185,7 +185,7 @@ async function sendAiMessage(text) {
 }
 $("#aiChatForm")?.addEventListener("submit",event=>{event.preventDefault();sendAiMessage(aiInput.value);});
 $("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
-$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
+$$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
 $("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiConversationSelect.value="";aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
 $("#aiRenameChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا یک گفتگوی ذخیره‌شده را انتخاب کن.",false);return;}const title=window.prompt("نام جدید گفتگو را وارد کن:",conversation.title||"گفتگوی جدید");if(title&&title.trim()){conversation.title=title.trim().slice(0,60);conversation.updatedAt=Date.now();saveAiHistory();renderAiConversationList();}});
 $("#aiDeleteChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا گفتگویی را برای حذف انتخاب کن.",false);return;}if(!window.confirm("این گفتگو و تاریخچه آن حذف شود؟"))return;aiConversations=aiConversations.filter(item=>item.id!==activeConversationId);activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگو حذف شد.";renderAiConversationList();saveAiHistory();});
