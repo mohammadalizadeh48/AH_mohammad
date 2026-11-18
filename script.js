@@ -151,6 +151,7 @@ async function loadAiModels() {
       const option = document.createElement("option");
       option.value = model.id;
       option.textContent = model.name || model.id;
+      option.dataset.vision = model.vision ? "true" : "false";
       aiModelSelect.append(option);
     });
     if (![...aiModelSelect.options].some(option => option.value === previous)) aiSelectedModel = "openrouter/free";
@@ -200,6 +201,10 @@ async function sendAiMessage(text) {
   const prompt = String(text || "").trim();
   const attachmentFile = aiSelectedAttachment;
   if ((!prompt && !attachmentFile) || aiBusy) return;
+  if (attachmentFile && attachmentFile.type.startsWith("image/") && aiModelSelect.selectedOptions[0]?.dataset.vision !== "true") {
+    message(aiNotice, "برای بررسی تصویر، از فهرست مدل‌ها مدلی را انتخاب کن که پشتیبانی تصویر دارد.", false);
+    return;
+  }
   if (prompt.length > 6000) { message(aiNotice, "پیام حداکثر می‌تواند ۶۰۰۰ نویسه باشد.", false); return; }
   const visiblePrompt = prompt || "لطفاً فایل پیوست‌شده را بررسی کن.";
   ensureAiConversation(visiblePrompt);
