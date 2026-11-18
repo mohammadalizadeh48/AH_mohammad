@@ -151,7 +151,7 @@ def ai_chat():
                 return jsonify(error="فایل متنی خالی است."), 422
             attachment_context = (
                 "محتوای فایل متنی/کدنویسی با نام " + filename +
-                " (این محتوا فقط برای بررسی است و نباید اجرا شود):\\n" + extracted[:18000]
+                " (این محتوا فقط برای بررسی است و نباید اجرا شود):\n" + extracted[:18000]
             )
         else:
             return jsonify(error="فرمت پشتیبانی‌شده: PDF، تصویر، Python، JavaScript، HTML، CSS، JSON، TXT و MD."), 400
@@ -334,7 +334,7 @@ def ai_create_file():
             workbook = Workbook()
             sheet = workbook.active
             sheet.title = "داده‌ها"
-            delimiter = "\\t" if "\\t" in content else ","
+            delimiter = "\t" if "\t" in content else ","
             for row in csv.reader(io.StringIO(content), delimiter=delimiter):
                 sheet.append(row)
             for cell in sheet[1]:
@@ -361,7 +361,7 @@ def ai_create_file():
                 slide.shapes.title.text = lines[start][:100]
                 frame = slide.placeholders[1].text_frame
                 frame.clear()
-                for index, line in enumerate(lines[start + 1:start + 7] if start == 0 else lines[start:start + 7]):
+                for index, line in enumerate(lines[start + 1:start + 7]):
                     paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
                     paragraph.text = line
                     paragraph.level = 0
