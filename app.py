@@ -31,6 +31,10 @@ LEGACY_UPLOAD_DIR = BASE_DIR / "uploads"
 if not UPLOAD_DIR.exists() and LEGACY_UPLOAD_DIR.exists() and UPLOAD_DIR != LEGACY_UPLOAD_DIR:
     shutil.copytree(LEGACY_UPLOAD_DIR, UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+GENERATED_DIR = Path(os.environ.get("GENERATED_FILES_DIR", str(PERSISTENT_DIR / "generated_files"))).resolve()
+if GENERATED_DIR == BASE_DIR or BASE_DIR in GENERATED_DIR.parents:
+    raise RuntimeError("GENERATED_FILES_DIR must be outside the public application directory")
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 QR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 QR_MEDIA_EXTENSIONS = QR_IMAGE_EXTENSIONS | {".mp4", ".webm", ".mov", ".m4v"}
 
@@ -282,12 +286,13 @@ def ai_chat():
                     "تو دستیار هوش مصنوعی رسمی محمد استودیو هستی. به زبان فارسی روان، محترمانه، دقیق و کاربردی پاسخ بده؛ "
                     "اگر کاربر به زبان دیگری نوشت، به همان زبان پاسخ بده. اگر پاسخ را نمی‌دانی، صادقانه بگو. "
                     "برای موضوعات فنی مراحل را روشن و ایمن توضیح بده. اطلاعات یا دسترسی‌ای را که نداری ادعا نکن. "
-                    "اگر فایلی پیوست شده، محتوای آن را با دقت بررسی کن و فقط بر اساس محتوای قابل مشاهده یا استخراج‌شده پاسخ بده."
+                    "اگر فایلی پیوست شده، محتوای آن را با دقت بررسی کن و فقط بر اساس محتوای قابل مشاهده یا استخراج‌شده پاسخ بده. "
+                    "اگر کاربر ساخت فایل Word یا DOCX خواست، محتوای کامل و آماده سند را تولید کن؛ هرگز نگو امکان ساخت فایل نداری و از کاربر نخواه خودش متن را در Word کپی کند."
                 )
             },
             *safe_messages
         ],
-        "max_tokens": 1600
+        "max_tokens": 3000
     }
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -314,7 +319,71 @@ def ai_chat():
         if not isinstance(answer, str) or not answer.strip():
             app.logger.error("OpenRouter returned no text; response id=%s", result.get("id"))
             return jsonify(error="پاسخ قابل‌نمایشی از سرویس هوش مصنوعی دریافت نشد. دوباره تلاش کن."), 502
-        return jsonify(reply=answer.strip())
+        answer = answer.strip()
+        latest_prompt = safe_messages[-1]["content"]
+        wants_docx = bool(re.search(
+            r"(?:فایل\s*(?:word|ورد|docx)|(?:word|ورد|docx)\s*(?:بساز|تهیه|آماده|تبدیل)|به\s*صورت\s*فایل\s*(?:word|ورد)|سند\s*word)",
+            latest_prompt,
+            re.IGNORECASE
+        ))
+        file_info = None
+        if wants_docx:
+            try:
+                from docx import Document
+                from docx.shared import Pt
+                from docx.oxml import OxmlElement
+                from docx.oxml.ns import qn
+
+                title = "سند محمد استودیو"
+                title_match = re.search(r"موضوع[\s:«\"]+([^»\"\n]{3,100})", latest_prompt)
+                if title_match:
+                    title = title_match.group(1).strip()
+                token = uuid.uuid4().hex
+                output_path = GENERATED_DIR / (token + ".docx")
+                now = datetime.now(timezone.utc).timestamp()
+                for old_file in GENERATED_DIR.glob("*.docx"):
+                    try:
+                        if now - old_file.stat().st_mtime > 86400:
+                            old_file.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+
+                document = Document()
+                document.add_heading(title, 0)
+                for line in answer.splitlines():
+                    clean_line = line.strip()
+                    if not clean_line:
+                        continue
+                    if clean_line.startswith("# "):
+                        paragraph = document.add_heading(clean_line[2:], level=1)
+                    elif clean_line.startswith("## "):
+                        paragraph = document.add_heading(clean_line[3:], level=2)
+                    elif clean_line.startswith(("- ", "* ")):
+                        paragraph = document.add_paragraph(clean_line[2:], style="List Bullet")
+                    else:
+                        paragraph = document.add_paragraph(clean_line)
+                    paragraph.alignment = 2
+                    p_pr = paragraph._p.get_or_add_pPr()
+                    bidi = OxmlElement("w:bidi")
+                    bidi.set(qn("w:val"), "1")
+                    p_pr.append(bidi)
+                    for run in paragraph.runs:
+                        run.font.name = "Tahoma"
+                        run.font.size = Pt(11)
+                        r_pr = run._element.get_or_add_rPr()
+                        rtl = OxmlElement("w:rtl")
+                        rtl.set(qn("w:val"), "1")
+                        r_pr.append(rtl)
+                document.save(str(output_path))
+                file_info = {
+                    "format": "docx",
+                    "filename": title + ".docx",
+                    "url": url_for("ai_download_file", token=token, extension="docx")
+                }
+            except Exception:
+                app.logger.exception("Automatic DOCX generation failed")
+                return jsonify(error="متن آماده شد، اما ساخت فایل Word ناموفق بود. مدیر سایت باید نصب python-docx را بررسی کند."), 500
+        return jsonify(reply=answer, file=file_info)
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")
         app.logger.error("OpenRouter API HTTP error %s: %s", error.code, detail[:1200])
@@ -331,6 +400,23 @@ def ai_chat():
     except (ValueError, KeyError, TypeError):
         app.logger.exception("OpenRouter response parsing failed")
         return jsonify(error="پاسخ سرویس هوش مصنوعی قابل پردازش نبود."), 502
+
+
+@app.get("/api/ai/download/<token>.<extension>")
+def ai_download_file(token, extension):
+    if not token.isalnum() or extension != "docx":
+        abort(404)
+    filename = token + ".docx"
+    path = GENERATED_DIR / filename
+    if not path.is_file():
+        abort(404)
+    try:
+        if datetime.now(timezone.utc).timestamp() - path.stat().st_mtime > 86400:
+            path.unlink(missing_ok=True)
+            abort(404)
+    except OSError:
+        abort(404)
+    return send_from_directory(GENERATED_DIR, filename, as_attachment=True, download_name="Mohammad-Studio.docx")
 
 
 @app.post("/api/ai/image")
