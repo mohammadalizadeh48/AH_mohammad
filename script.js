@@ -230,6 +230,16 @@ async function sendAiMessage(text) {
     if (!data.reply) throw new Error("پاسخ خالی از سرور دریافت شد.");
     aiMessages.push({role:"assistant",content:data.reply});
     pending.querySelector("p").textContent = data.reply;
+    if (data.file && data.file.url) {
+      const fileLink = document.createElement("a");
+      fileLink.href = data.file.url;
+      fileLink.download = data.file.filename || "Mohammad-Studio.docx";
+      fileLink.textContent = "دانلود فایل Word آماده‌شده";
+      fileLink.className = "ai-manage-btn";
+      fileLink.style.display = "inline-block";
+      fileLink.style.marginTop = "10px";
+      pending.append(fileLink);
+    }
     persistActiveAiConversation();
   } catch (error) {
     pending.remove();
