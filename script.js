@@ -32,22 +32,26 @@ const aiModelSelect = $("#aiModelSelect"), aiConversationSelect = $("#aiConversa
 let aiConversations = [];
 let activeConversationId = null;
 let aiSelectedModel = localStorage.getItem(AI_MODEL_KEY) || "openrouter/free";
-function loadAiHistory() {
+async function saveAiHistory(conversation) {
+  if (!conversation) return;
+  const snapshot = {
+    title: conversation.title,
+    model: conversation.model,
+    messages: conversation.messages.slice(-40)
+  };
+  const previous = conversation._saveQueue || Promise.resolve();
+  conversation._saveQueue = previous.catch(() => {}).then(() =>
+    api("/api/ai/conversations/" + encodeURIComponent(conversation.id), {
+      method: "PUT", body: JSON.stringify(snapshot)
+    })
+  );
   try {
-    const value = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
-    return Array.isArray(value) ? value.filter(x => x && typeof x.id === "string" && Array.isArray(x.messages)) : [];
+    const data = await conversation._saveQueue;
+    conversation.updatedAt = data.updatedAt || new Date().toISOString();
+    aiConversations.sort((a,b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+    renderAiConversationList();
   } catch (error) {
-    console.warn("AI history could not be read", error);
-    return [];
-  }
-}
-function saveAiHistory() {
-  try {
-    aiConversations.sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    aiConversations = aiConversations.slice(0,30);
-    localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(aiConversations));
-  } catch (error) {
-    message(aiNotice, "ذخیره تاریخچه ممکن نشد؛ فضای ذخیره‌سازی مرورگر را بررسی کن.", false);
+    message(aiNotice, "ذخیره گفتگو روی سرور انجام نشد: " + error.message, false);
   }
 }
 function renderAiConversationList() {
@@ -73,8 +77,8 @@ function persistActiveAiConversation() {
   if (!conversation) return;
   conversation.messages = aiMessages.slice(-40);
   conversation.model = aiSelectedModel;
-  conversation.updatedAt = Date.now();
-  saveAiHistory();
+  conversation.updatedAt = new Date().toISOString();
+  saveAiHistory(conversation);
   renderAiConversationList();
 }
 function ensureAiConversation(firstPrompt) {
@@ -161,7 +165,6 @@ async function loadAiModels() {
     console.warn("AI model list could not be loaded", error);
   }
 }
-aiConversations = loadAiHistory();
 renderAiConversationList();
 aiModelSelect.value = aiSelectedModel;
 aiModelSelect.addEventListener("change", () => {
@@ -258,10 +261,43 @@ aiImageButton?.addEventListener("click", async () => {
 $("#aiInput")?.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();$("#aiChatForm").requestSubmit();}});
 $$("[data-ai-prompt]").forEach(button=>button.addEventListener("click",()=>{aiInput.value=button.dataset.aiPrompt;aiInput.focus();}));
 $("#aiNewChat")?.addEventListener("click",()=>{if(aiBusy)return;activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiConversationSelect.value="";aiNotice.textContent="گفتگوی جدید شروع شد.";aiInput.value="";aiInput.focus();});
-$("#aiRenameChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا یک گفتگوی ذخیره‌شده را انتخاب کن.",false);return;}const title=window.prompt("نام جدید گفتگو را وارد کن:",conversation.title||"گفتگوی جدید");if(title&&title.trim()){conversation.title=title.trim().slice(0,60);conversation.updatedAt=Date.now();saveAiHistory();renderAiConversationList();}});
-$("#aiDeleteChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا گفتگویی را برای حذف انتخاب کن.",false);return;}if(!window.confirm("این گفتگو و تاریخچه آن حذف شود؟"))return;aiConversations=aiConversations.filter(item=>item.id!==activeConversationId);activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگو حذف شد.";renderAiConversationList();saveAiHistory();});
+$("#aiRenameChat")?.addEventListener("click",()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا یک گفتگوی ذخیره‌شده را انتخاب کن.",false);return;}const title=window.prompt("نام جدید گفتگو را وارد کن:",conversation.title||"گفتگوی جدید");if(title&&title.trim()){conversation.title=title.trim().slice(0,60);conversation.updatedAt=new Date().toISOString();saveAiHistory(conversation);renderAiConversationList();}});
+$("#aiDeleteChat")?.addEventListener("click",async()=>{const conversation=activeAiConversation();if(!conversation){message(aiNotice,"ابتدا گفتگویی را برای حذف انتخاب کن.",false);return;}if(!window.confirm("این گفتگو و تاریخچه آن حذف شود؟"))return;try{await api("/api/ai/conversations/"+encodeURIComponent(conversation.id),{method:"DELETE"});aiConversations=aiConversations.filter(item=>item.id!==activeConversationId);activeConversationId=null;aiMessages.length=0;aiMessagesBox.replaceChildren();aiWelcome.hidden=false;aiNotice.textContent="گفتگو حذف شد.";renderAiConversationList();}catch(error){message(aiNotice,error.message,false);}});
 loadAiModels();
-if (aiConversations.length) restoreAiConversation(aiConversations[0].id);
+(async () => {
+  try {
+    const history = await api("/api/ai/conversations");
+    aiConversations = Array.isArray(history.conversations) ? history.conversations : [];
+    // Migrate conversations saved by the previous browser-only version once.
+    if (!aiConversations.length) {
+      let legacy = [];
+      try {
+        const stored = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
+        if (Array.isArray(stored)) legacy = stored.filter(x => x && typeof x.id === "string" && Array.isArray(x.messages));
+      } catch (_) {}
+      for (const old of legacy.slice(0, 30)) {
+        const migrated = {
+          id: old.id,
+          title: String(old.title || "گفتگوی قبلی").slice(0, 60),
+          model: String(old.model || "openrouter/free"),
+          messages: old.messages.filter(m => m && ["user", "assistant"].includes(m.role) && typeof m.content === "string").slice(-40),
+          updatedAt: new Date(Number(old.updatedAt) || Date.now()).toISOString()
+        };
+        if (migrated.model !== "openrouter/free" && !migrated.model.endsWith(":free")) migrated.model = "openrouter/free";
+        aiConversations.push(migrated);
+        await saveAiHistory(migrated);
+      }
+      if (legacy.length) {
+        try { localStorage.removeItem(AI_HISTORY_KEY); } catch (_) {}
+      }
+    }
+    aiConversations.sort((a,b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+    renderAiConversationList();
+    if (aiConversations.length) restoreAiConversation(aiConversations[0].id);
+  } catch (error) {
+    message(aiNotice, "دریافت تاریخچه گفتگوها از سرور ممکن نشد: " + error.message, false);
+  }
+})();
 $("#shortenUrl")?.addEventListener("click",async()=>{const out=$("#shortUrlOutput");try{const d=await api("/api/shorten",{method:"POST",body:JSON.stringify({url:$("#longUrl").value.trim()})});out.textContent=d.url}catch(e){message(out,e.message,false)}});
 $("#toUpper")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toUpperCase());
 $("#toLower")?.addEventListener("click",()=>$("#convertOutput").textContent=$("#convertInput").value.toLowerCase());
