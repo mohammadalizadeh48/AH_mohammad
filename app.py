@@ -1,15 +1,27 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, shutil
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_FILE = BASE_DIR / "site_data.json"
-DB_FILE = Path(os.environ.get("DATA_DB_PATH", str(BASE_DIR / "mohammad_studio.sqlite3")))
+DB_FILE = Path(os.environ.get("DATA_DB_PATH", str(BASE_DIR / "mohammad_studio.sqlite3"))).resolve()
+PERSISTENT_DIR = DB_FILE.parent
+PERSISTENT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Keep editable site content and uploaded media beside the SQLite database.
+# In production DATA_DB_PATH points to /data, which is the persistent Runflare disk.
+DATA_FILE = Path(os.environ.get("SITE_DATA_FILE", str(PERSISTENT_DIR / "site_data.json"))).resolve()
+LEGACY_DATA_FILE = BASE_DIR / "site_data.json"
+if not DATA_FILE.exists() and LEGACY_DATA_FILE.exists() and DATA_FILE != LEGACY_DATA_FILE:
+    shutil.copy2(LEGACY_DATA_FILE, DATA_FILE)
+
 app = Flask(__name__, static_folder=str(BASE_DIR), static_url_path="")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=25*1024*1024)
-UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
+UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(PERSISTENT_DIR / "uploads"))).resolve()
+LEGACY_UPLOAD_DIR = BASE_DIR / "uploads"
+if not UPLOAD_DIR.exists() and LEGACY_UPLOAD_DIR.exists() and UPLOAD_DIR != LEGACY_UPLOAD_DIR:
+    shutil.copytree(LEGACY_UPLOAD_DIR, UPLOAD_DIR)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 QR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 QR_MEDIA_EXTENSIONS = QR_IMAGE_EXTENSIONS | {".mp4", ".webm", ".mov", ".m4v"}
