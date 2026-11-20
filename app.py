@@ -397,7 +397,7 @@ def ai_create_file():
                 for value in row:
                     stripped = value.lstrip()
                     formula_like = stripped.startswith(("=", "+", "@")) or (
-                        stripped.startswith("-") and not re.match(r"^-\\d+(?:\\.\\d+)?$", stripped)
+                        stripped.startswith("-") and not re.match(r"^-\d+(?:\.\d+)?$", stripped)
                     )
                     safe_row.append("'" + value if formula_like else value)
                 sheet.append(safe_row)
