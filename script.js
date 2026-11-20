@@ -31,7 +31,6 @@ const aiMessages = [];
 let aiBusy = false;
 const AI_HISTORY_KEY = "mohammadStudioAiConversationsV1";
 const AI_MODEL_KEY = "mohammadStudioAiModelV1";
-const AI_MODEL_KEY = "mohammadStudioAiModelV1";
 let aiConversations = [];
 let activeConversationId = null;
 let aiSelectedModel = "openrouter/free";
@@ -44,16 +43,21 @@ function saveSelectedModel() {
 }
 async function saveAiHistory(conversation) {
   if (!conversation) return;
+  // Serialize writes per conversation so a slower earlier request cannot overwrite newer messages.
+  const snapshot = {
+    title: conversation.title, model: conversation.model,
+    messages: conversation.messages.slice(-40)
+  };
+  const previous = conversation._saveQueue || Promise.resolve();
+  conversation._saveQueue = previous.catch(() => {}).then(() =>
+    api("/api/ai/conversations/" + encodeURIComponent(conversation.id), {
+      method: "PUT", body: JSON.stringify(snapshot)
+    })
+  );
   try {
-    const data = await api("/api/ai/conversations/" + encodeURIComponent(conversation.id), {
-      method: "PUT",
-      body: JSON.stringify({
-        title: conversation.title, model: conversation.model,
-        messages: conversation.messages.slice(-40)
-      })
-    });
+    const data = await conversation._saveQueue;
     conversation.updatedAt = data.updatedAt || new Date().toISOString();
-    aiConversations.sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    aiConversations.sort((a,b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
     renderAiConversationList();
   } catch (error) {
     message(aiNotice, "ذخیره گفتگو روی سرور انجام نشد: " + error.message, false);
@@ -67,7 +71,7 @@ function renderAiConversationList() {
   placeholder.value = "";
   placeholder.textContent = "انتخاب گفتگو";
   aiConversationSelect.append(placeholder);
-  aiConversations.sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).forEach(conversation => {
+  aiConversations.sort((a,b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0)).forEach(conversation => {
     const option = document.createElement("option");
     option.value = conversation.id;
     option.textContent = conversation.title || "گفتگوی بدون عنوان";
@@ -320,6 +324,27 @@ loadAiModels();
   try {
     const history = await api("/api/ai/conversations");
     aiConversations = Array.isArray(history.conversations) ? history.conversations : [];
+    // Migrate old browser-only conversations once, without discarding them.
+    if (!aiConversations.length) {
+      let legacy = [];
+      try {
+        const stored = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
+        if (Array.isArray(stored)) legacy = stored.filter(x => x && typeof x.id === "string" && Array.isArray(x.messages));
+      } catch (_) {}
+      for (const old of legacy.slice(0, 30)) {
+        const migrated = {
+          id: old.id, title: String(old.title || "گفتگوی قبلی").slice(0, 60),
+          model: String(old.model || "openrouter/free"),
+          messages: old.messages.filter(m => m && ["user","assistant"].includes(m.role) && typeof m.content === "string").slice(-40),
+          updatedAt: new Date(Number(old.updatedAt) || Date.now()).toISOString()
+        };
+        if (migrated.model !== "openrouter/free" && !migrated.model.endsWith(":free")) migrated.model = "openrouter/free";
+        aiConversations.push(migrated);
+        await saveAiHistory(migrated);
+      }
+      try { if (legacy.length) localStorage.removeItem(AI_HISTORY_KEY); } catch (_) {}
+    }
+    aiConversations.sort((a,b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
     renderAiConversationList();
     if (aiConversations.length) restoreAiConversation(aiConversations[0].id);
   } catch (error) {
