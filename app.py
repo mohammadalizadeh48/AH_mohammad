@@ -1,4 +1,4 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, shutil
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, shutil, re
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
@@ -17,7 +17,15 @@ if not DATA_FILE.exists() and LEGACY_DATA_FILE.exists() and DATA_FILE != LEGACY_
 
 app = Flask(__name__, static_folder=str(BASE_DIR), static_url_path="")
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=25*1024*1024)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "1") == "1",
+    SESSION_COOKIE_DOMAIN=os.environ.get("SESSION_COOKIE_DOMAIN", ".runflare.cloud"),
+    SESSION_COOKIE_NAME="mohammad_studio_session_v2",
+    PERMANENT_SESSION_LIFETIME=__import__("datetime").timedelta(days=365),
+    MAX_CONTENT_LENGTH=25*1024*1024
+)
 UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(PERSISTENT_DIR / "uploads"))).resolve()
 LEGACY_UPLOAD_DIR = BASE_DIR / "uploads"
 if not UPLOAD_DIR.exists() and LEGACY_UPLOAD_DIR.exists() and UPLOAD_DIR != LEGACY_UPLOAD_DIR:
@@ -51,12 +59,22 @@ def db():
     CREATE TABLE IF NOT EXISTS votes(suggestion_id INTEGER NOT NULL,visitor TEXT NOT NULL,PRIMARY KEY(suggestion_id,visitor));
     CREATE TABLE IF NOT EXISTS visits(day TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS shortlinks(code TEXT PRIMARY KEY,target TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ai_conversations(
+        id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+        model TEXT NOT NULL, messages_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_conversations_owner_updated
+        ON ai_conversations(owner, updated_at DESC);
     """)
     return c
 
 def stamp(): return datetime.now(timezone.utc).isoformat()
 def visitor():
-    if not session.get("visitor_id"): session["visitor_id"]=secrets.token_urlsafe(20)
+    # The shared Runflare parent-domain cookie keeps the same visitor identity
+    # when the temporary app subdomain is regenerated.
+    session.permanent = True
+    if not session.get("visitor_id"):
+        session["visitor_id"] = secrets.token_urlsafe(32)
     return session["visitor_id"]
 
 @app.before_request
@@ -70,6 +88,78 @@ def track():
 def home(): return app.send_static_file("index.html")
 @app.get("/api/site")
 def site(): return jsonify(load_data())
+
+@app.get("/api/ai/conversations")
+def ai_list_conversations():
+    owner = visitor()
+    with db() as c:
+        rows = c.execute(
+            "SELECT id,title,model,messages_json,updated_at FROM ai_conversations WHERE owner=? ORDER BY updated_at DESC LIMIT 30",
+            (owner,)
+        ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            messages = json.loads(row["messages_json"])
+            if not isinstance(messages, list):
+                messages = []
+        except (TypeError, ValueError):
+            messages = []
+        result.append({
+            "id": row["id"], "title": row["title"], "model": row["model"],
+            "messages": messages, "updatedAt": row["updated_at"]
+        })
+    return jsonify(conversations=result)
+
+@app.put("/api/ai/conversations/<conversation_id>")
+def ai_save_conversation(conversation_id):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", conversation_id):
+        return jsonify(error="شناسه گفتگو معتبر نیست."), 400
+    body = request.get_json(silent=True) or {}
+    title = str(body.get("title") or "گفتگوی جدید").strip()[:60] or "گفتگوی جدید"
+    model = str(body.get("model") or "openrouter/free").strip()
+    if model != "openrouter/free" and (not model.endswith(":free") or len(model) > 200):
+        return jsonify(error="فقط مدل‌های رایگان قابل ذخیره هستند."), 400
+    messages = body.get("messages")
+    if not isinstance(messages, list) or len(messages) > 40:
+        return jsonify(error="ساختار تاریخچه گفتگو معتبر نیست."), 400
+    safe_messages = []
+    for item in messages:
+        if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+            return jsonify(error="ساختار پیام گفتگو معتبر نیست."), 400
+        content = item.get("content")
+        if not isinstance(content, str) or len(content) > 6000:
+            return jsonify(error="متن یکی از پیام‌ها معتبر نیست."), 400
+        safe_messages.append({"role": item["role"], "content": content})
+    owner = visitor()
+    updated = stamp()
+    with db() as c:
+        existing = c.execute("SELECT owner FROM ai_conversations WHERE id=?", (conversation_id,)).fetchone()
+        if existing and existing["owner"] != owner:
+            return jsonify(error="به این گفتگو دسترسی نداری."), 404
+        c.execute(
+            """INSERT INTO ai_conversations(id,owner,title,model,messages_json,updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET title=excluded.title,model=excluded.model,
+               messages_json=excluded.messages_json,updated_at=excluded.updated_at
+               WHERE ai_conversations.owner=excluded.owner""",
+            (conversation_id, owner, title, model, json.dumps(safe_messages, ensure_ascii=False), updated)
+        )
+        c.execute(
+            """DELETE FROM ai_conversations WHERE owner=? AND id NOT IN
+               (SELECT id FROM ai_conversations WHERE owner=? ORDER BY updated_at DESC LIMIT 30)""",
+            (owner, owner)
+        )
+    return jsonify(ok=True, updatedAt=updated)
+
+@app.delete("/api/ai/conversations/<conversation_id>")
+def ai_delete_conversation(conversation_id):
+    owner = visitor()
+    with db() as c:
+        cur = c.execute("DELETE FROM ai_conversations WHERE id=? AND owner=?", (conversation_id, owner))
+    if not cur.rowcount:
+        return jsonify(error="گفتگو پیدا نشد."), 404
+    return jsonify(ok=True)
 
 @app.get("/api/ai/models")
 def ai_models():
