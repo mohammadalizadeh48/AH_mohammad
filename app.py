@@ -1,4 +1,4 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, csv, re
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
@@ -11,6 +11,10 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1", MAX_CONTENT_LENGTH=25*1024*1024)
 UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", str(BASE_DIR / "uploads"))).resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+GENERATED_DIR = Path(os.environ.get("GENERATED_FILES_DIR", str(Path(os.environ.get("TMPDIR", "/tmp")) / "mohammad_studio_generated_files"))).resolve()
+if GENERATED_DIR == BASE_DIR or BASE_DIR in GENERATED_DIR.parents:
+    raise RuntimeError("GENERATED_FILES_DIR must be outside the public application directory")
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 QR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 QR_MEDIA_EXTENSIONS = QR_IMAGE_EXTENSIONS | {".mp4", ".webm", ".mov", ".m4v"}
 
@@ -39,13 +43,49 @@ def db():
     CREATE TABLE IF NOT EXISTS votes(suggestion_id INTEGER NOT NULL,visitor TEXT NOT NULL,PRIMARY KEY(suggestion_id,visitor));
     CREATE TABLE IF NOT EXISTS visits(day TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS shortlinks(code TEXT PRIMARY KEY,target TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ai_conversations(
+        id TEXT PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+        model TEXT NOT NULL, messages_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_conversations_owner_updated
+        ON ai_conversations(owner, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS ai_rate_events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL,
+        bucket TEXT NOT NULL, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_rate_owner_bucket_time
+        ON ai_rate_events(owner, bucket, created_at);
     """)
     return c
 
 def stamp(): return datetime.now(timezone.utc).isoformat()
 def visitor():
-    if not session.get("visitor_id"): session["visitor_id"]=secrets.token_urlsafe(20)
+    # A long-lived signed session keeps anonymous conversations available
+    # after browser restarts without exposing them to other visitors.
+    session.permanent = True
+    if not session.get("visitor_id"):
+        session["visitor_id"] = secrets.token_urlsafe(32)
     return session["visitor_id"]
+
+app.config["PERMANENT_SESSION_LIFETIME"] = __import__("datetime").timedelta(days=365)
+
+def ai_session_rate_limit(bucket, limit, window_seconds):
+    """SQLite-backed per-visitor throttle; survives refreshes and session-cookie rotation."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    owner = visitor()
+    with db() as c:
+        c.execute("DELETE FROM ai_rate_events WHERE created_at < ?", (now - max(window_seconds, 86400),))
+        rows = c.execute(
+            "SELECT created_at FROM ai_rate_events WHERE owner=? AND bucket=? AND created_at>? ORDER BY created_at",
+            (owner, bucket, now - window_seconds)
+        ).fetchall()
+        if len(rows) >= limit:
+            return False, max(1, window_seconds - (now - int(rows[0]["created_at"])))
+        c.execute(
+            "INSERT INTO ai_rate_events(owner,bucket,created_at) VALUES(?,?,?)",
+            (owner, bucket, now)
+        )
+    return True, 0
 
 @app.before_request
 def track():
@@ -58,6 +98,78 @@ def track():
 def home(): return app.send_static_file("index.html")
 @app.get("/api/site")
 def site(): return jsonify(load_data())
+
+@app.get("/api/ai/conversations")
+def ai_list_conversations():
+    owner = visitor()
+    with db() as c:
+        rows = c.execute(
+            "SELECT id,title,model,messages_json,updated_at FROM ai_conversations WHERE owner=? ORDER BY updated_at DESC LIMIT 30",
+            (owner,)
+        ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            messages = json.loads(row["messages_json"])
+            if not isinstance(messages, list):
+                messages = []
+        except (TypeError, ValueError):
+            messages = []
+        result.append({
+            "id": row["id"], "title": row["title"], "model": row["model"],
+            "messages": messages, "updatedAt": row["updated_at"]
+        })
+    return jsonify(conversations=result)
+
+@app.put("/api/ai/conversations/<conversation_id>")
+def ai_save_conversation(conversation_id):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", conversation_id):
+        return jsonify(error="شناسه گفتگو معتبر نیست."), 400
+    body = request.get_json(silent=True) or {}
+    title = str(body.get("title") or "گفتگوی جدید").strip()[:60] or "گفتگوی جدید"
+    model = str(body.get("model") or "openrouter/free").strip()
+    if model != "openrouter/free" and (not model.endswith(":free") or len(model) > 200):
+        return jsonify(error="فقط مدل‌های رایگان قابل ذخیره هستند."), 400
+    messages = body.get("messages")
+    if not isinstance(messages, list) or len(messages) > 40:
+        return jsonify(error="ساختار تاریخچه گفتگو معتبر نیست."), 400
+    safe_messages = []
+    for item in messages:
+        if not isinstance(item, dict) or item.get("role") not in ("user", "assistant"):
+            return jsonify(error="ساختار پیام گفتگو معتبر نیست."), 400
+        content = item.get("content")
+        if not isinstance(content, str) or len(content) > 6000:
+            return jsonify(error="متن یکی از پیام‌ها معتبر نیست."), 400
+        safe_messages.append({"role": item["role"], "content": content})
+    owner = visitor()
+    updated = stamp()
+    with db() as c:
+        existing = c.execute("SELECT owner FROM ai_conversations WHERE id=?", (conversation_id,)).fetchone()
+        if existing and existing["owner"] != owner:
+            return jsonify(error="به این گفتگو دسترسی نداری."), 404
+        c.execute(
+            """INSERT INTO ai_conversations(id,owner,title,model,messages_json,updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET title=excluded.title,model=excluded.model,
+               messages_json=excluded.messages_json,updated_at=excluded.updated_at
+               WHERE ai_conversations.owner=excluded.owner""",
+            (conversation_id, owner, title, model, json.dumps(safe_messages, ensure_ascii=False), updated)
+        )
+        c.execute(
+            """DELETE FROM ai_conversations WHERE owner=? AND id NOT IN
+               (SELECT id FROM ai_conversations WHERE owner=? ORDER BY updated_at DESC LIMIT 30)""",
+            (owner, owner)
+        )
+    return jsonify(ok=True, updatedAt=updated)
+
+@app.delete("/api/ai/conversations/<conversation_id>")
+def ai_delete_conversation(conversation_id):
+    owner = visitor()
+    with db() as c:
+        cur = c.execute("DELETE FROM ai_conversations WHERE id=? AND owner=?", (conversation_id, owner))
+    if not cur.rowcount:
+        return jsonify(error="گفتگو پیدا نشد."), 404
+    return jsonify(ok=True)
 
 @app.get("/api/ai/models")
 def ai_models():
@@ -92,6 +204,12 @@ def ai_models():
 
 @app.post("/api/ai/chat")
 def ai_chat():
+    allowed, retry_after = ai_session_rate_limit("chat", 30, 3600)
+    if not allowed:
+        response = jsonify(error="تعداد درخواست‌های دستیار در این مرورگر زیاد است. کمی بعد دوباره تلاش کن.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         return jsonify(error="دستیار هوشمند هنوز به OpenRouter متصل نشده است. مدیر سایت باید OPENROUTER_API_KEY را در تنظیمات محیطی سرور ثبت کند."), 503
@@ -140,8 +258,19 @@ def ai_chat():
             if not data_url.startswith("data:" + mime + ";base64,"):
                 return jsonify(error="فرمت تصویر معتبر نیست."), 400
             image_part = {"type": "image_url", "image_url": {"url": data_url}}
+        elif Path(filename).suffix.lower() in {".py", ".js", ".html", ".css", ".json", ".txt", ".md"}:
+            try:
+                extracted = raw_file.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                return jsonify(error="فایل متنی باید با کدگذاری UTF-8 ذخیره شده باشد."), 422
+            if not extracted.strip():
+                return jsonify(error="فایل متنی خالی است."), 422
+            attachment_context = (
+                "محتوای فایل متنی/کدنویسی با نام " + filename +
+                " (این محتوا فقط برای بررسی است و نباید اجرا شود):\n" + extracted[:18000]
+            )
         else:
-            return jsonify(error="فعلاً فقط فایل PDF و تصویر PNG/JPG/WEBP/GIF پشتیبانی می‌شود."), 400
+            return jsonify(error="فرمت پشتیبانی‌شده: PDF، تصویر، Python، JavaScript، HTML، CSS، JSON، TXT و MD."), 400
 
     safe_messages = []
     total_chars = 0
@@ -234,6 +363,12 @@ def ai_chat():
 @app.post("/api/ai/image")
 def ai_generate_image():
     """Generate images only with the explicitly free OpenRouter image model."""
+    allowed, retry_after = ai_session_rate_limit("image", 3, 3600)
+    if not allowed:
+        response = jsonify(error="برای جلوگیری از سوءاستفاده، در هر مرورگر حداکثر ۳ تصویر در ساعت ساخته می‌شود.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         return jsonify(error="کلید OpenRouter روی سرور تنظیم نشده است."), 503
@@ -284,6 +419,142 @@ def ai_generate_image():
     except (urllib.error.URLError, TimeoutError, ValueError):
         app.logger.exception("Free image generation failed")
         return jsonify(error="ارتباط با مدل رایگان تصویر برقرار نشد."), 504
+
+@app.post("/api/ai/create-file")
+def ai_create_file():
+    """Create office documents from user-provided text; never execute user code."""
+    allowed, retry_after = ai_session_rate_limit("office", 5, 3600)
+    if not allowed:
+        response = jsonify(error="در هر مرورگر حداکثر ۵ فایل در ساعت ساخته می‌شود.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
+    body = request.get_json(silent=True) or {}
+    file_format = str(body.get("format") or "").lower().strip()
+    title = str(body.get("title") or "خروجی محمد استودیو").strip()[:120]
+    content = str(body.get("content") or "").strip()
+    if file_format not in {"docx", "xlsx", "pptx"}:
+        return jsonify(error="فرمت فایل باید Word، Excel یا PowerPoint باشد."), 400
+    if not content:
+        return jsonify(error="محتوای فایل را وارد کن."), 400
+    if len(content) > 40000:
+        return jsonify(error="محتوای فایل حداکثر ۴۰ هزار نویسه باشد."), 413
+
+    token = uuid.uuid4().hex
+    output_name = token + "." + file_format
+    output_path = GENERATED_DIR / output_name
+    # Remove generated documents older than 24 hours to prevent unbounded disk growth.
+    now = datetime.now(timezone.utc).timestamp()
+    try:
+        for old_file in GENERATED_DIR.iterdir():
+            try:
+                if old_file.is_file() and now - old_file.stat().st_mtime > 86400:
+                    old_file.unlink(missing_ok=True)
+            except OSError:
+                app.logger.warning("Could not clean expired generated file: %s", old_file.name)
+    except OSError:
+        app.logger.exception("Could not inspect generated files directory")
+    try:
+        if file_format == "docx":
+            from docx import Document
+            from docx.shared import Pt
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            document = Document()
+            document.add_heading(title or "سند", 0)
+            for line in content.splitlines():
+                document.add_paragraph(line)
+            for paragraph in document.paragraphs:
+                paragraph.alignment = 2  # right aligned for Persian
+                p_pr = paragraph._p.get_or_add_pPr()
+                bidi = OxmlElement("w:bidi")
+                bidi.set(qn("w:val"), "1")
+                p_pr.append(bidi)
+                for run in paragraph.runs:
+                    run.font.name = "Tahoma"
+                    run.font.size = Pt(11)
+                    r_pr = run._element.get_or_add_rPr()
+                    rtl = OxmlElement("w:rtl")
+                    rtl.set(qn("w:val"), "1")
+                    r_pr.append(rtl)
+            document.save(str(output_path))
+        elif file_format == "xlsx":
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "داده‌ها"
+            delimiter = "\t" if "\t" in content else ","
+            for row in csv.reader(io.StringIO(content), delimiter=delimiter):
+                safe_row = []
+                for value in row:
+                    stripped = value.lstrip()
+                    formula_like = stripped.startswith(("=", "+", "@")) or (
+                        stripped.startswith("-") and not re.match(r"^-\d+(?:\.\d+)?$", stripped)
+                    )
+                    safe_row.append("'" + value if formula_like else value)
+                sheet.append(safe_row)
+            for cell in sheet[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="245A85")
+                cell.alignment = Alignment(horizontal="center")
+            for column in sheet.columns:
+                letter = column[0].column_letter
+                width = min(max(max(len(str(cell.value or "")) for cell in column) + 2, 12), 42)
+                sheet.column_dimensions[letter].width = width
+            sheet.freeze_panes = "A2"
+            workbook.save(str(output_path))
+        else:
+            from pptx import Presentation
+            from pptx.util import Inches, Pt
+            presentation = Presentation()
+            lines = [line.strip() for line in content.splitlines() if line.strip()]
+            title_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+            title_slide.shapes.title.text = title or "ارائه محمد استودیو"
+            if len(title_slide.placeholders) > 1:
+                title_slide.placeholders[1].text = "ساخته‌شده با دستیار هوشمند محمد استودیو"
+            for start in range(0, len(lines), 7):
+                slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+                slide.shapes.title.text = lines[start][:100]
+                frame = slide.placeholders[1].text_frame
+                frame.clear()
+                for index, line in enumerate(lines[start + 1:start + 7]):
+                    paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+                    paragraph.text = line
+                    paragraph.level = 0
+                    paragraph.font.size = Pt(22)
+                    paragraph.alignment = 2
+                    p_pr = paragraph._p.get_or_add_pPr()
+                    p_pr.set("rtl", "1")
+            presentation.save(str(output_path))
+        return jsonify(
+            ok=True,
+            filename=title + "." + file_format,
+            url=url_for("ai_download_file", token=token, extension=file_format)
+        )
+    except Exception:
+        app.logger.exception("Office document generation failed")
+        output_path.unlink(missing_ok=True)
+        return jsonify(error="ساخت فایل انجام نشد. متن را کوتاه‌تر کن یا دوباره تلاش کن."), 500
+
+
+@app.get("/api/ai/download/<token>.<extension>")
+def ai_download_file(token, extension):
+    if not token.isalnum() or extension not in {"docx", "xlsx", "pptx"}:
+        abort(404)
+    filename = token + "." + extension
+    path = GENERATED_DIR / filename
+    if not path.is_file():
+        abort(404)
+    try:
+        if datetime.now(timezone.utc).timestamp() - path.stat().st_mtime > 86400:
+            path.unlink(missing_ok=True)
+            abort(404)
+    except OSError:
+        abort(404)
+    download_names = {"docx": "Mohammad-Studio.docx", "xlsx": "Mohammad-Studio.xlsx", "pptx": "Mohammad-Studio.pptx"}
+    return send_from_directory(GENERATED_DIR, filename, as_attachment=True, download_name=download_names[extension])
+
 
 @app.get("/api/stats")
 def stats():
