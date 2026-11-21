@@ -1,7 +1,35 @@
-import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, shutil, re
+import base64, io, json, os, secrets, sqlite3, uuid, urllib.request, urllib.error, shutil, re, ssl, time
 from pathlib import Path
 from datetime import datetime, timezone
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for, jsonify, send_from_directory
+
+
+
+def open_url_with_retry(req, timeout, attempts=3):
+    """Retry temporary network/TLS failures with short exponential backoff."""
+    for attempt in range(attempts):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            retryable = error.code in (408, 425, 429, 500, 502, 503, 504)
+            if not retryable or attempt >= attempts - 1:
+                raise
+            retry_after = error.headers.get("Retry-After") if error.headers else None
+            try:
+                delay = min(max(float(retry_after), 0.5), 5.0) if retry_after else 0.8 * (2 ** attempt)
+            except (TypeError, ValueError):
+                delay = 0.8 * (2 ** attempt)
+            error.close()
+            app.logger.warning("Temporary upstream HTTP %s; retrying request (%s/%s) in %.1fs",
+                               error.code, attempt + 1, attempts - 1, delay)
+            time.sleep(delay)
+        except (urllib.error.URLError, TimeoutError, ssl.SSLError, ConnectionError) as error:
+            if attempt >= attempts - 1:
+                raise
+            delay = 0.8 * (2 ** attempt)
+            app.logger.warning("Temporary upstream connection/TLS failure; retrying request (%s/%s) in %.1fs: %s",
+                               attempt + 1, attempts - 1, delay, error)
+            time.sleep(delay)
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_FILE = Path(os.environ.get("DATA_DB_PATH", str(BASE_DIR / "mohammad_studio.sqlite3"))).resolve()
@@ -306,7 +334,7 @@ def ai_chat():
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=50) as response:
+        with open_url_with_retry(req, timeout=50, attempts=3) as response:
             result = json.loads(response.read().decode("utf-8"))
         choices = result.get("choices") or []
         message = choices[0].get("message", {}) if choices else {}
@@ -449,7 +477,7 @@ def ai_generate_image():
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=100) as response:
+        with open_url_with_retry(req, timeout=100, attempts=3) as response:
             result = json.loads(response.read().decode("utf-8"))
         items = result.get("data") or []
         image = items[0] if items else {}
